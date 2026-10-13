@@ -366,14 +366,23 @@ namespace tk
             int img_h = int.Parse(json.GetField("img_h").str);
             int img_d = int.Parse(json.GetField("img_d").str);
             string img_enc = json.GetField("img_enc").str;
+            // 可选遥测推流帧率(默认 20 维持旧行为;>0 时覆盖 limitFPS)
+            float fps = 0f;
+            if (json.HasField("fps")) { fps = float.Parse(json.GetField("fps").str, CultureInfo.InvariantCulture.NumberFormat); }
 
             if (carObj != null)
-                UnityMainThreadDispatcher.Instance().Enqueue(SetCamConfig(iCamera, fov, offset_x, offset_y, offset_z, rot_x, rot_y, rot_z, img_w, img_h, img_d, img_enc, fish_eye_x, fish_eye_y));
+                UnityMainThreadDispatcher.Instance().Enqueue(SetCamConfig(iCamera, fov, offset_x, offset_y, offset_z, rot_x, rot_y, rot_z, img_w, img_h, img_d, img_enc, fish_eye_x, fish_eye_y, fps));
         }
 
         IEnumerator SetCamConfig(int iCamera, float fov, float offset_x, float offset_y, float offset_z, float rot_x,
-            float rot_y, float rot_z, int img_w, int img_h, int img_d, string img_enc, float fish_eye_x, float fish_eye_y)
+            float rot_y, float rot_z, int img_w, int img_h, int img_d, string img_enc, float fish_eye_x, float fish_eye_y,
+            float fps = 0f)
         {
+            // cam_config 的 fps 键:遥测推流帧率。必须在主线程应用(发送节流在
+            // Update 里读 limitFPS)。<=0 保持默认 20 不变,向后兼容。
+            if (fps > 0f)
+                limitFPS = fps;
+
             CameraSensor cam = null;
 
             if (iCamera == 0)
@@ -566,13 +575,6 @@ namespace tk
                     bResetCar = false;
                 }
 
-                timeSinceLastCapture += Time.fixedDeltaTime;
-                if (timeSinceLastCapture >= 1.0f / limitFPS)
-                {
-                    timeSinceLastCapture -= (1.0f / limitFPS);
-                    SendTelemetry();
-                }
-
                 if (ai_text != null)
                     ai_text.text = string.Format("NN: {0} : {1}", ai_steering, ai_throttle);
 
@@ -592,6 +594,22 @@ namespace tk
                 {
                     Boot();
                 }
+            }
+        }
+
+        void Update()
+        {
+            // 遥测发送节流放渲染循环:FixedUpdate 默认 50Hz,limitFPS 提到 60
+            // 也发不满;Update 跟随游戏渲染帧率(60fps)。同步 step 模式保留
+            // 旧行为(不在这里发),该模式本就由物理节拍驱动。
+            if (state != State.SendTelemetry || !asynchronous)
+                return;
+
+            timeSinceLastCapture += Time.deltaTime;
+            if (timeSinceLastCapture >= 1.0f / limitFPS)
+            {
+                timeSinceLastCapture -= (1.0f / limitFPS);
+                SendTelemetry();
             }
         }
 

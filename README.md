@@ -28,6 +28,17 @@ Then validate the steering control by sending images to your neural network and 
 
 You need to have [Unity](https://unity3d.com/get-unity/download) installed, and all python modules listed in the Requirements section below.
 
+The Unity project is `sdsim/`; see `ProjectSettings/ProjectVersion.txt` for the exact editor version (currently **2020.3.49f1** — install that exact version via Unity Hub to avoid project upgrades). Build the macOS player from the command line (after the first GUI open has imported assets once):
+
+```bash
+"/Applications/Unity/Hub/Editor/2020.3.49f1/Unity.app/Contents/MacOS/Unity" \
+  -batchmode -projectPath sdsim \
+  -executeMethod BuildCommand.Build \
+  -buildTargetStandaloneOSX build/donkey_sim.app -quit
+```
+
+Telemetry streaming rate is runtime-configurable per client: send `"fps": 60` in `cam_config` (default remains 20 for backward compatibility).
+
 Linix Unity install [here](https://forum.unity3d.com/threads/unity-on-linux-release-notes-and-known-issues.350256/). Check last post in this thread.
 
 You need python 3.4 or higher, 64 bit. You can create a virtual env if you like:
