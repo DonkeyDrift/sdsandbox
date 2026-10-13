@@ -105,21 +105,27 @@ public class CameraSensor : MonoBehaviour {
 			}
 			else
 			{
-				// 请求完成后 NativeArray 即失效,立刻拷成 RGB24 再放手
+				// 请求完成后 NativeArray 即失效,立刻拷成 RGB24 再放手。
+				// readback 原始数据是 bottom-up(UV 原点在左下),ReadPixels 是
+				// top-down——逐行翻转,否则画面上下颠倒。
 				NativeArray<byte> rgba = pendingReq.GetData<byte>();
 				byte[] rgb = RentBuffer();
 				bool gray = (depth == 1);
-				int px = width * height;
-				for (int i = 0; i < px; i++)
+				for (int y = 0; y < height; y++)
 				{
-					int s = i * 4, d = i * 3;
-					byte r = rgba[s], g = rgba[s + 1], b = rgba[s + 2];
-					if (gray)
+					int srcRow = (height - 1 - y) * width;
+					int dstRow = y * width;
+					for (int x = 0; x < width; x++)
 					{
-						byte lum = (byte)(0.2126f * r + 0.7152f * g + 0.0722f * b);
-						r = g = b = lum;
+						int s = (srcRow + x) * 4, d = (dstRow + x) * 3;
+						byte r = rgba[s], g = rgba[s + 1], b = rgba[s + 2];
+						if (gray)
+						{
+							byte lum = (byte)(0.2126f * r + 0.7152f * g + 0.0722f * b);
+							r = g = b = lum;
+						}
+						rgb[d] = r; rgb[d + 1] = g; rgb[d + 2] = b;
 					}
-					rgb[d] = r; rgb[d + 1] = g; rgb[d + 2] = b;
 				}
 				pendingReq = default;
 
@@ -141,13 +147,16 @@ public class CameraSensor : MonoBehaviour {
 		LastCaptureMs = Time.realtimeSinceStartup * 1000f - t0;
 	}
 
-	/// <summary>发送节流触发新请求(发送频率=传感器相机渲染次数,无额外 Render)。</summary>
+	/// <summary>发送节流触发:先手动 Render 填 RT,再发异步回读请求。
+	/// 注意:传感器相机在 prefab 中是 component-disabled(靠手动 Render 出图,
+	/// 不参与每帧自动渲染)——此前误判"冗余 Render"实为唯一出图路径,去掉会全黑。</summary>
 	void KickReadback()
 	{
 		if (readbackBroken || hasPending || ren == null)
 			return;
 		try
 		{
+			sensorCam.Render();
 			pendingReq = UnityEngine.Rendering.AsyncGPUReadback.Request(ren);
 			hasPending = true;
 		}
