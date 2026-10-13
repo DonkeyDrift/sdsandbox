@@ -19,7 +19,12 @@ public static class BuildCommand
 
         BuildPlayerOptions opts = new BuildPlayerOptions
         {
-            scenes = new[] { "Assets/Scenes/menu.unity" },
+            // 用 EditorBuildSettings 里启用的全部场景(11 个),只编 menu 会导致
+            // 客户端连上后无法加载 generated_track 等场景、永远收不到遥测。
+            scenes = System.Linq.Enumerable.ToArray(
+                System.Linq.Enumerable.Select(
+                    System.Linq.Enumerable.Where(EditorBuildSettings.scenes, s => s.enabled),
+                    s => s.path)),
             locationPathName = outputPath,
             target = BuildTarget.StandaloneOSX,
             options = BuildOptions.None,

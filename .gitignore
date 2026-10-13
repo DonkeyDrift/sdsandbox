@@ -68,3 +68,6 @@ dataset
 /src/camera_b.png
 /sdsim/Assets/StreamingAssets
 /sdsim/Assets/AssetBundles
+
+# 本地构建产物
+build/
