@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using tk;
@@ -40,6 +40,18 @@ public class SandboxServer : MonoBehaviour
                     port = int.Parse(args[i + 1]);
                     argPort = true;
                 }
+                else if (args[i] == "--telemetry_fps")
+                {
+                    GlobalState.telemetry_fps = float.Parse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture.NumberFormat);
+                }
+                else if (args[i] == "--quality")
+                {
+                    GlobalState.quality_level = int.Parse(args[i + 1]);
+                }
+                else if (args[i] == "--vsync")
+                {
+                    GlobalState.vsync_count = int.Parse(args[i + 1]);
+                }
             }
         }
 
@@ -62,6 +74,19 @@ public class SandboxServer : MonoBehaviour
     void Start()
     {
         CheckCommandLineConnectArgs();
+
+        // 画质/垂直同步命令行覆盖(二分开关;工程默认档 5=Ultra,见 QualitySettings)
+        if (GlobalState.quality_level >= 0)
+        {
+            int q = Mathf.Clamp(GlobalState.quality_level, 0, QualitySettings.names.Length - 1);
+            QualitySettings.SetQualityLevel(q, true);
+            Debug.Log("SDSandbox quality override -> " + q + " (" + QualitySettings.names[q] + ")");
+        }
+        if (GlobalState.vsync_count >= 0)
+        {
+            QualitySettings.vSyncCount = GlobalState.vsync_count;
+            Debug.Log("SDSandbox vsync override -> " + GlobalState.vsync_count);
+        }
 
         Debug.Log("SDSandbox Server starting.");
         _server.onClientConntedCB += new tk.TcpServer.OnClientConnected(OnClientConnected);

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 
 
@@ -35,4 +35,12 @@ public static class GlobalState
     public static List<AssetBundle> bundleScenes = new List<AssetBundle>();
     public static bool drawLidar = true;
     public static float timeOut = 300f;
+
+    // ---- 遥测二分开关(命令行,--host/--port 同款,见 SandboxServer) ----
+    // telemetry_fps: >0 时服务端强制遥测推流帧率(cam_config fps 键的 CLI 上位开关,
+    // 二分实验用;0=按 cam_config/默认 20)
+    public static float telemetry_fps = 0f;
+    // quality_level/vsync_count: >=0 时启动即覆盖画质档/垂直同步(-1=不动,用工程默认)
+    public static int quality_level = -1;
+    public static int vsync_count = -1;
 }

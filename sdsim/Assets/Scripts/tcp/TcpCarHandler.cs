@@ -599,18 +599,63 @@ namespace tk
 
         void Update()
         {
-            // 遥测发送节流放渲染循环:FixedUpdate 默认 50Hz,limitFPS 提到 60
-            // 也发不满;Update 跟随游戏渲染帧率(60fps)。同步 step 模式保留
-            // 旧行为(不在这里发),该模式本就由物理节拍驱动。
+            // 遥测发送节流放渲染循环:FixedUpdate 物理 100Hz、limitFPS 提到 60
+            // 也发不满(相位错开);Update 跟随渲染帧率。帧率优先级:
+            // --telemetry_fps(服务端强制,二分用) > cam_config fps 键 > 默认 20。
             if (state != State.SendTelemetry || !asynchronous)
                 return;
 
+            if (camSensor != null)
+                camSensor.Tick();
+            if (camSensorB != null)
+                camSensorB.Tick();
+
+            float effFps = GlobalState.telemetry_fps > 0f ? GlobalState.telemetry_fps : limitFPS;
             timeSinceLastCapture += Time.deltaTime;
-            if (timeSinceLastCapture >= 1.0f / limitFPS)
+            if (timeSinceLastCapture >= 1.0f / effFps)
             {
-                timeSinceLastCapture -= (1.0f / limitFPS);
+                timeSinceLastCapture -= (1.0f / effFps);
                 SendTelemetry();
+                NoteSend();
             }
+
+            TelemetryStats();
+        }
+
+        // ---- 遥测自检仪表(二分实验用,每 5s 一行) ----
+        float _statSendEma = 20f;   // 发送间隔倒数 EMA(实测推流 fps)
+        float _statFrameEma = 1f / 60f; // 主线程帧间隔 EMA(渲染 fps)
+        float _statLastSendAt = -1f;
+        float _statNextReportAt = 5f;
+        int _statSent;
+
+        void NoteSend()
+        {
+            float now = Time.unscaledTime;
+            _statSent++;
+            if (_statLastSendAt >= 0f)
+            {
+                float gap = now - _statLastSendAt;
+                if (gap > 0.0001f)
+                    _statSendEma = Mathf.Lerp(_statSendEma, 1f / gap, 0.05f);
+            }
+            _statLastSendAt = now;
+        }
+
+        void TelemetryStats()
+        {
+            _statFrameEma = Mathf.Lerp(_statFrameEma, Time.unscaledDeltaTime, 0.05f);
+            float now = Time.unscaledTime;
+            if (now < _statNextReportAt)
+                return;
+            _statNextReportAt = now + 5f;
+            float capMs = camSensor != null ? camSensor.LastCaptureMs : 0f;
+            Debug.Log(string.Format(
+                "[telemetry-stats] send_fps={0:F1} render_fps={1:F1} capture_ms={2:F1} sent={3}",
+                _statSendEma,
+                1f / Mathf.Max(_statFrameEma, 0.00001f),
+                capMs,
+                _statSent));
         }
 
         public bool IsGhostCar()
