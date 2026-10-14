@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 
 
@@ -209,7 +209,7 @@ public class Car : MonoBehaviour, ICar{
 		lastAccel = requestTorque;
 		prevVel = velocity;
 		velocity = transform.InverseTransformDirection(rb.velocity);
-		acceleration = (velocity - prevVel)/Time.deltaTime;
+		acceleration = (velocity - prevVel)/Time.fixedDeltaTime; // FixedUpdate 内用 fixedDeltaTime:帧率波动时 deltaTime 让加速度遥测失真
 		gyro = rb.angularVelocity;
 		rotation = rb.rotation;
 

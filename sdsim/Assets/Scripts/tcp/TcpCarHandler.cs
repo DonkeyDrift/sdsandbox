@@ -366,14 +366,23 @@ namespace tk
             int img_h = int.Parse(json.GetField("img_h").str);
             int img_d = int.Parse(json.GetField("img_d").str);
             string img_enc = json.GetField("img_enc").str;
+            // 可选遥测推流帧率(默认 20 维持旧行为;>0 时覆盖 limitFPS)
+            float fps = 0f;
+            if (json.HasField("fps")) { fps = float.Parse(json.GetField("fps").str, CultureInfo.InvariantCulture.NumberFormat); }
 
             if (carObj != null)
-                UnityMainThreadDispatcher.Instance().Enqueue(SetCamConfig(iCamera, fov, offset_x, offset_y, offset_z, rot_x, rot_y, rot_z, img_w, img_h, img_d, img_enc, fish_eye_x, fish_eye_y));
+                UnityMainThreadDispatcher.Instance().Enqueue(SetCamConfig(iCamera, fov, offset_x, offset_y, offset_z, rot_x, rot_y, rot_z, img_w, img_h, img_d, img_enc, fish_eye_x, fish_eye_y, fps));
         }
 
         IEnumerator SetCamConfig(int iCamera, float fov, float offset_x, float offset_y, float offset_z, float rot_x,
-            float rot_y, float rot_z, int img_w, int img_h, int img_d, string img_enc, float fish_eye_x, float fish_eye_y)
+            float rot_y, float rot_z, int img_w, int img_h, int img_d, string img_enc, float fish_eye_x, float fish_eye_y,
+            float fps = 0f)
         {
+            // cam_config 的 fps 键:遥测推流帧率。必须在主线程应用(发送节流在
+            // Update 里读 limitFPS)。<=0 保持默认 20 不变,向后兼容。
+            if (fps > 0f)
+                limitFPS = fps;
+
             CameraSensor cam = null;
 
             if (iCamera == 0)
@@ -566,13 +575,6 @@ namespace tk
                     bResetCar = false;
                 }
 
-                timeSinceLastCapture += Time.fixedDeltaTime;
-                if (timeSinceLastCapture >= 1.0f / limitFPS)
-                {
-                    timeSinceLastCapture -= (1.0f / limitFPS);
-                    SendTelemetry();
-                }
-
                 if (ai_text != null)
                     ai_text.text = string.Format("NN: {0} : {1}", ai_steering, ai_throttle);
 
@@ -593,6 +595,67 @@ namespace tk
                     Boot();
                 }
             }
+        }
+
+        void Update()
+        {
+            // 遥测发送节流放渲染循环:FixedUpdate 物理 100Hz、limitFPS 提到 60
+            // 也发不满(相位错开);Update 跟随渲染帧率。帧率优先级:
+            // --telemetry_fps(服务端强制,二分用) > cam_config fps 键 > 默认 20。
+            if (state != State.SendTelemetry || !asynchronous)
+                return;
+
+            if (camSensor != null)
+                camSensor.Tick();
+            if (camSensorB != null)
+                camSensorB.Tick();
+
+            float effFps = GlobalState.telemetry_fps > 0f ? GlobalState.telemetry_fps : limitFPS;
+            timeSinceLastCapture += Time.deltaTime;
+            if (timeSinceLastCapture >= 1.0f / effFps)
+            {
+                timeSinceLastCapture -= (1.0f / effFps);
+                SendTelemetry();
+                NoteSend();
+            }
+
+            TelemetryStats();
+        }
+
+        // ---- 遥测自检仪表(二分实验用,每 5s 一行) ----
+        float _statSendEma = 20f;   // 发送间隔倒数 EMA(实测推流 fps)
+        float _statFrameEma = 1f / 60f; // 主线程帧间隔 EMA(渲染 fps)
+        float _statLastSendAt = -1f;
+        float _statNextReportAt = 5f;
+        int _statSent;
+
+        void NoteSend()
+        {
+            float now = Time.unscaledTime;
+            _statSent++;
+            if (_statLastSendAt >= 0f)
+            {
+                float gap = now - _statLastSendAt;
+                if (gap > 0.0001f)
+                    _statSendEma = Mathf.Lerp(_statSendEma, 1f / gap, 0.05f);
+            }
+            _statLastSendAt = now;
+        }
+
+        void TelemetryStats()
+        {
+            _statFrameEma = Mathf.Lerp(_statFrameEma, Time.unscaledDeltaTime, 0.05f);
+            float now = Time.unscaledTime;
+            if (now < _statNextReportAt)
+                return;
+            _statNextReportAt = now + 5f;
+            float capMs = camSensor != null ? camSensor.LastCaptureMs : 0f;
+            Debug.Log(string.Format(
+                "[telemetry-stats] send_fps={0:F1} render_fps={1:F1} capture_ms={2:F1} sent={3}",
+                _statSendEma,
+                1f / Mathf.Max(_statFrameEma, 0.00001f),
+                capMs,
+                _statSent));
         }
 
         public bool IsGhostCar()
