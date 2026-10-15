@@ -26,6 +26,8 @@ public class CameraSensor : MonoBehaviour {
 	const int JPG_QUALITY = 75; // 与 Unity EncodeToJPG 默认一致,保持码率可比
 
 	byte[] lastJpg;
+	int lastJpgLen;         // lastJpg 的有效长度(缓冲容量可能大于内容)
+	byte[] jpgBack;         // 编码线程写入缓冲;完成后与 lastJpg 交换(双缓冲,零分配)
 	readonly object jpgLock = new object();
 	// 2022.3 中该 API 位于 UnityEngine.Rendering 命名空间(根命名空间无别名)
 	UnityEngine.Rendering.AsyncGPUReadbackRequest pendingReq;
@@ -139,7 +141,7 @@ public class CameraSensor : MonoBehaviour {
 					EnsureEncodeThread();
 				}
 				if (jpg != null)
-					lock (jpgLock) { lastJpg = jpg; }
+					lock (jpgLock) { lastJpg = jpg; lastJpgLen = jpg.Length; }
 				// 主线程编码路径的 buffer 在 EncodeOnMainThread 内归还
 			}
 		}
@@ -191,9 +193,15 @@ public class CameraSensor : MonoBehaviour {
 					if (jobs.Count == 0) break;
 					rgb = jobs.Dequeue();
 				}
-				byte[] jpg = StbJpeg.Encode(rgb, width, height, JPG_QUALITY);
-				if (jpg != null)
-					lock (jpgLock) { lastJpg = jpg; }
+				// 双缓冲:编码写 jpgBack,完成后与已发布的 lastJpg 交换,
+				// 全程无每帧 byte[] 分配(dst 不足时 EncodeInto 才扩容,随内容收敛)。
+				int len = StbJpeg.EncodeInto(rgb, width, height, JPG_QUALITY, ref jpgBack);
+				if (len > 0)
+					lock (jpgLock)
+					{
+						byte[] t = lastJpg; lastJpg = jpgBack; jpgBack = t;
+						lastJpgLen = len;
+					}
 				ReturnBuffer(rgb);
 			}
 		}
@@ -288,5 +296,22 @@ public class CameraSensor : MonoBehaviour {
 				return lastJpg;
 		}
 		return GetImage().EncodeToJPG();
+	}
+
+	/// <summary>把最近一帧 JPEG 直接 base64 进调用方字符缓冲(遥测零分配路径,
+	/// TcpCarHandler.SendTelemetry 用)。返回写入的字符数。
+	/// outChars 容量须 >= 4*ceil(jpgLen/3);base64 转换在 jpgLock 内完成,
+	/// 防止编码线程中途交换缓冲(拷贝 ~100µs,编码线程可承受)。</summary>
+	public int GetLatestJpgBase64(char[] outChars)
+	{
+		KickReadback();
+		lock (jpgLock)
+		{
+			if (lastJpg != null)
+				return System.Convert.ToBase64CharArray(lastJpg, 0, lastJpgLen, outChars, 0);
+		}
+		// 首帧未就绪:同步回退(一次性,走旧分配路径)
+		byte[] jpg = GetImage().EncodeToJPG(JPG_QUALITY);
+		return System.Convert.ToBase64CharArray(jpg, 0, jpg.Length, outChars, 0);
 	}
 }

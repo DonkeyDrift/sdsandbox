@@ -11,7 +11,7 @@ macOS 13+ 通用。
 | **60Hz 遥测推流** | `cam_config` 新增可选 `fps` 键（默认 20 不变，向后兼容）。客户端发 `"fps": 60` 即真实 60fps 图像流，无插帧 |
 | **异步采集管线** | AsyncGPUReadback + 工作线程 JPEG 编码，主线程采包 ~0.5ms，遥测天花板 ~58Hz 消除 |
 | **命令行开关** | `--host` `--port` `--telemetry_fps N` `--quality N`（0=最低画质）`--vsync N` |
-| **自检仪表** | 日志每 5s 输出 `[telemetry-stats] send_fps/render_fps/capture_ms` |
+| **自检仪表** | 日志每 5s 输出 `[telemetry-stats] send_fps/render_fps/capture_ms/sent/tx_drop` |
 | **修复** | 加速度遥测 fixedDeltaTime 计算错误 |
 
 ## 安装

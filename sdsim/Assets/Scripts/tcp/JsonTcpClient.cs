@@ -68,6 +68,12 @@ namespace tk
             client.SendData( bytes );
         }
 
+        // ---- 遥测零分配发送通道(缓冲租用/提交/归还,实现见 TcpClient) ----
+        public byte[] RentSendBuffer() { return client.RentSendBuffer(); }
+        public bool SendRaw(byte[] buf, int len) { return client.CommitPooledSend(buf, len); }
+        public void ReturnSendBuffer(byte[] buf) { client.ReturnSendBuffer(buf); }
+        public int PooledSendDrops { get { return client != null ? client.pooledSendDrops : 0; } }
+
 
         // Our callback from the TCPClient to get data.
         void OnDataRecv(byte[] bytes)

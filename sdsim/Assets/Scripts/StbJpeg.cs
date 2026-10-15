@@ -19,22 +19,32 @@ public static class StbJpeg
     /// <summary>rgb24 编码;失败(缺库/编码错)返回 null。</summary>
     public static byte[] Encode(byte[] rgb, int w, int h, int quality)
     {
+        byte[] dst = null;
+        int len = EncodeInto(rgb, w, h, quality, ref dst);
+        return len > 0 ? dst : null;
+    }
+
+    /// <summary>rgb24 编码进调用方缓冲(零分配路径);dst 不足时自动扩容。
+    /// 返回有效字节数;失败(缺库/编码错)返回 -1。</summary>
+    public static int EncodeInto(byte[] rgb, int w, int h, int quality, ref byte[] dst)
+    {
         if (!Available)
-            return null;
+            return -1;
         try
         {
             int len = stbj_write_jpg(rgb, w, h, quality, out IntPtr ptr);
             if (len <= 0 || ptr == IntPtr.Zero)
-                return null;
-            byte[] jpg = new byte[len];
-            Marshal.Copy(ptr, jpg, 0, len);
+                return -1;
+            if (dst == null || dst.Length < len)
+                dst = new byte[len];
+            Marshal.Copy(ptr, dst, 0, len);
             stbj_free(ptr);
-            return jpg;
+            return len;
         }
         catch (DllNotFoundException)
         {
             Available = false;
-            return null;
+            return -1;
         }
     }
 }

@@ -141,6 +141,154 @@ namespace tk
             if (client == null)
                 return;
 
+            // 非 JPG 编码(Logger/PNG/TGA 场景)不在性能关键路径,走旧 JSONObject 路径
+            if (camSensor.img_enc != "JPG")
+            {
+                SendTelemetryLegacy();
+                return;
+            }
+
+            byte[] buf = client.RentSendBuffer();
+            if (buf == null)
+            {
+                // 发送池耗尽(客户端严重反压):遥测是实时数据,丢帧优于积压旧帧
+                _txDrops++;
+                return;
+            }
+            _txBuf = buf;
+            _txLen = 0;
+            _txOverflow = false;
+
+            TxAscii("{\"msg_type\":\"telemetry\"");
+            TxAscii(",\"steering_angle\":"); TxNum(car.GetSteering() / steer_to_angle);
+            TxAscii(",\"throttle\":"); TxNum(car.GetThrottle());
+
+            TxAscii(",\"image\":");
+            if (!TxBase64Image(camSensor)) { AbortTx(buf); SendTelemetryLegacy(); return; }
+
+            if (camSensorB != null && camSensorB.gameObject.activeInHierarchy)
+            {
+                TxAscii(",\"imageb\":");
+                if (!TxBase64Image(camSensorB)) { AbortTx(buf); SendTelemetryLegacy(); return; }
+            }
+
+            if (lidar != null && lidar.gameObject.activeInHierarchy)
+            {
+                TxAscii(",\"lidar\":");
+                TxAscii(lidar.GetOutputAsJson().ToString());
+            }
+
+            foreach (Odometry o in odom)
+            {
+                TxAscii(",\""); TxAscii(o.Label); TxAscii("\":"); TxNum(o.GetNumberRotations());
+            }
+
+            TxAscii(",\"hit\":\""); TxAscii(car.GetLastCollision()); TxAscii("\"");
+            car.ClearLastCollision();
+            TxAscii(",\"time\":"); TxNum(Time.timeSinceLevelLoad);
+
+            Vector3 velocity = car.GetVelocity() / 8.0f;
+            TxAscii(",\"speed\":"); TxNum(velocity.magnitude);
+
+            Vector3 accel = car.GetAccel() / 8.0f;
+            TxAscii(",\"accel_x\":"); TxNum(accel.x);
+            TxAscii(",\"accel_y\":"); TxNum(accel.y);
+            TxAscii(",\"accel_z\":"); TxNum(accel.z);
+
+            Vector3 gyro = car.GetGyro();
+            TxAscii(",\"gyro_x\":"); TxNum(gyro.x);
+            TxAscii(",\"gyro_y\":"); TxNum(gyro.y);
+            TxAscii(",\"gyro_z\":"); TxNum(gyro.z);
+
+            Transform tm = car.GetTransform();
+            Vector3 eulerAngles = tm.rotation.eulerAngles;
+            TxAscii(",\"pitch\":"); TxNum(eulerAngles.x);
+            TxAscii(",\"yaw\":"); TxNum(eulerAngles.y);
+            TxAscii(",\"roll\":"); TxNum(eulerAngles.z);
+
+            if (pm != null)
+            {
+                float cte = 0.0f;
+                pm.carPath.GetCrossTrackErr(tm.position, ref iActiveSpan, ref cte); // get distance to closest node
+                if (GlobalState.extendedTelemetry) { TxAscii(",\"cte\":"); TxNum(cte); }
+
+                TxAscii(",\"activeNode\":"); TxNum(iActiveSpan);
+                TxAscii(",\"totalNodes\":"); TxNum(pm.carPath.nodes.Count);
+            }
+
+            // not intended to use in races, just to train
+            if (GlobalState.extendedTelemetry)
+            {
+                Vector3 pos = tm.position / 8.0f;
+                TxAscii(",\"pos_x\":"); TxNum(pos.x);
+                TxAscii(",\"pos_y\":"); TxNum(pos.y);
+                TxAscii(",\"pos_z\":"); TxNum(pos.z);
+
+                TxAscii(",\"vel_x\":"); TxNum(velocity.x);
+                TxAscii(",\"vel_y\":"); TxNum(velocity.y);
+                TxAscii(",\"vel_z\":"); TxNum(velocity.z);
+            }
+            TxAscii("}\n");
+
+            if (_txOverflow)
+            {
+                // 报文超出发送缓冲(lidar 等可变长字段):回退旧路径,不发送截断包
+                AbortTx(buf);
+                SendTelemetryLegacy();
+                return;
+            }
+
+            if (!client.SendRaw(buf, _txLen))
+                _txDrops++;
+        }
+
+        // ---- 零分配遥测拼包 ----
+        // 旧路径 JSONObject.ToString+Convert.ToBase64String+UTF8.GetBytes 每帧产生
+        // ~3x 报文大小的临时大对象(640x480@60fps ≈ 25MB/s 垃圾),非增量 GC 全停
+        // 主线程,表现为窗口不定时卡顿闪动。新路径:池化发送缓冲(TcpClient)+
+        // ToBase64CharArray+手工 ASCII 拼包,每帧仅剩几十字节的数字格式化小对象。
+        // 字段名/顺序/类型与旧路径逐一对齐(见 SendTelemetryLegacy)。
+        char[] _b64Chars;       // 池化 base64 字符缓冲,按需扩容
+        byte[] _txBuf;          // 当前租用的发送缓冲
+        int _txLen;
+        bool _txOverflow;       // 拼包越界标志(缓冲不足时后续写入变 no-op,整体回退旧路径)
+        long _txDrops;          // 拼包侧丢弃的遥测帧数(TelemetryStats 输出)
+
+        void TxAscii(string s)
+        {
+            if (_txOverflow || _txLen + s.Length > _txBuf.Length) { _txOverflow = true; return; }
+            for (int i = 0; i < s.Length; i++) _txBuf[_txLen++] = (byte)s[i];
+        }
+        void TxNum(double v) { TxAscii(v.ToString(CultureInfo.InvariantCulture)); }
+        void TxNum(int v) { TxAscii(v.ToString(CultureInfo.InvariantCulture)); }
+
+        bool TxBase64Image(CameraSensor sensor)
+        {
+            // 容量上界:JPEG <= w*h*3(RGB 原始大小,实际远小于此)
+            int need = 4 * ((sensor.width * sensor.height * 3 + 2) / 3) + 16;
+            if (_b64Chars == null || _b64Chars.Length < need)
+                _b64Chars = new char[need];
+            int n = sensor.GetLatestJpgBase64(_b64Chars);
+            if (n < 0 || _txLen + n + 2 >= _txBuf.Length)
+                return false;
+            _txBuf[_txLen++] = (byte)'"';
+            for (int i = 0; i < n; i++)
+                _txBuf[_txLen++] = (byte)_b64Chars[i];
+            _txBuf[_txLen++] = (byte)'"';
+            return true;
+        }
+
+        void AbortTx(byte[] buf)
+        {
+            client.ReturnSendBuffer(buf);
+            _txBuf = null;
+            _txLen = 0;
+            _txDrops++;
+        }
+
+        // 旧 JSONObject 发送路径:非 JPG 编码或零分配路径异常时回退,行为不变。
+        void SendTelemetryLegacy()
+        {
             JSONObject json = new JSONObject(JSONObject.Type.OBJECT);
             json.AddField("msg_type", "telemetry");
 
@@ -198,7 +346,7 @@ namespace tk
                 json.AddField("totalNodes", pm.carPath.nodes.Count);
             }
 
-            // not intended to use in races, just to train 
+            // not intended to use in races, just to train
             if (GlobalState.extendedTelemetry)
             {
                 Vector3 pos = tm.position / 8.0f;
@@ -650,12 +798,14 @@ namespace tk
                 return;
             _statNextReportAt = now + 5f;
             float capMs = camSensor != null ? camSensor.LastCaptureMs : 0f;
+            long txDrops = _txDrops + (client != null ? client.PooledSendDrops : 0);
             Debug.Log(string.Format(
-                "[telemetry-stats] send_fps={0:F1} render_fps={1:F1} capture_ms={2:F1} sent={3}",
+                "[telemetry-stats] send_fps={0:F1} render_fps={1:F1} capture_ms={2:F1} sent={3} tx_drop={4}",
                 _statSendEma,
                 1f / Mathf.Max(_statFrameEma, 0.00001f),
                 capMs,
-                _statSent));
+                _statSent,
+                txDrops));
         }
 
         public bool IsGhostCar()
