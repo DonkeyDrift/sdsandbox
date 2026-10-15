@@ -71,3 +71,4 @@ dataset
 
 # 本地构建产物
 build/
+dist/
