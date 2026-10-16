@@ -34,7 +34,10 @@ public class CarRecovery : MonoBehaviour
     static void Bootstrap()
     {
         GameObject go = new GameObject("CarRecovery");
+        // 必须跨场景保留:app 流程是 menu -> 赛道,不挂 DontDestroyOnLoad 会在切场景时被销毁
+        DontDestroyOnLoad(go);
         go.AddComponent<CarRecovery>();
+        Debug.Log("[CarRecovery] initialized");
     }
 
     Car GetPlayerCar()
