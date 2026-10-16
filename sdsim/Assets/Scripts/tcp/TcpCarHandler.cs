@@ -415,7 +415,9 @@ namespace tk
 
         void ExitScene()
         {
-            SceneManager.LoadSceneAsync(0);
+            // 启动场景已改为 mountain_track(见 EditorBuildSettings),
+            // 返回前端菜单必须按名字加载,不能再用 build index 0。
+            SceneManager.LoadSceneAsync("menu");
         }
 
         void OnResetCarRecv(JSONObject json)
