@@ -46,6 +46,7 @@ namespace tk
         bool asynchronous = true;
         float time_step = 0.1f;
         bool bResetCar = false;
+        bool bResetToNearest = false;
         bool bExitScene = false;
 
         public enum State
@@ -85,6 +86,7 @@ namespace tk
             client.dispatcher.Register("control", new tk.Delegates.OnMsgRecv(OnControlsRecv));
             client.dispatcher.Register("exit_scene", new tk.Delegates.OnMsgRecv(OnExitSceneRecv));
             client.dispatcher.Register("reset_car", new tk.Delegates.OnMsgRecv(OnResetCarRecv));
+            client.dispatcher.Register("reset_to_nearest", new tk.Delegates.OnMsgRecv(OnResetToNearestRecv));
             client.dispatcher.Register("step_mode", new tk.Delegates.OnMsgRecv(OnStepModeRecv));
             client.dispatcher.Register("quit_app", new tk.Delegates.OnMsgRecv(OnQuitApp));
             client.dispatcher.Register("regen_road", new tk.Delegates.OnMsgRecv(OnRegenRoad));
@@ -421,6 +423,13 @@ namespace tk
             bResetCar = true;
         }
 
+        // 就近回位到赛道中央并摆正(与本地 R 键同一逻辑,见 CarRecovery)。
+        // 旧版模拟器未注册此消息时由 Dispatcher 静默忽略,不崩溃。
+        void OnResetToNearestRecv(JSONObject json)
+        {
+            bResetToNearest = true;
+        }
+
         void OnRegenRoad(JSONObject json)
         {
             //This causes the track to be regenerated with the given settings.
@@ -721,6 +730,29 @@ namespace tk
                     }
 
                     bResetCar = false;
+                }
+
+                if (bResetToNearest)
+                {
+                    int iNearest = -1;
+                    Car carComp = car as Car;
+                    if (carComp != null)
+                        iNearest = CarRecovery.ResetCarToNearestPathNode(carComp);
+
+                    if (carObj != null)
+                    {
+                        //reset last controls
+                        car.RequestSteering(0.0f);
+                        car.RequestThrottle(0.0f);
+                        car.RequestFootBrake(10.0f);
+
+                        // 遥测的最近路径点跟随复位目标,保持 cross-track 误差连续
+                        if (pm && iNearest >= 0)
+                            iActiveSpan = iNearest;
+                    }
+
+                    Debug.Log("[TcpCarHandler] reset_to_nearest: node " + iNearest);
+                    bResetToNearest = false;
                 }
 
                 if (ai_text != null)

@@ -28,7 +28,6 @@ public class CarRecovery : MonoBehaviour
 
     Car playerCar;
     CarSpawner spawner;
-    PathManager pathManager;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Bootstrap()
@@ -54,14 +53,6 @@ public class CarRecovery : MonoBehaviour
         }
 
         return playerCar;
-    }
-
-    PathManager GetPathManager()
-    {
-        if (pathManager == null)
-            pathManager = FindObjectOfType<PathManager>();
-
-        return pathManager;
     }
 
     void Update()
@@ -116,18 +107,21 @@ public class CarRecovery : MonoBehaviour
         }
     }
 
-    void ResetToNearestPathNode(Car car, string reason)
+    // 回位核心:就近赛道中央摆正。返回所用路径节点 index,无路径返回 -1(此时已回出生点)。
+    // 静态方法供 R 键/自动恢复与 TcpCarHandler 的 reset_to_nearest 消息共用。
+    public static int ResetCarToNearestPathNode(Car car, float liftHeight = 0.4f)
     {
-        PathManager pm = GetPathManager();
+        PathManager pm = FindObjectOfType<PathManager>();
         bool usePath = pm != null && pm.carPath != null && pm.carPath.nodes.Count > 0;
 
         Vector3 pos;
         Quaternion rot;
+        int iNode = -1;
 
         if (usePath)
         {
-            int iClosest = pm.carPath.GetClosestSpanIndex(car.transform.position);
-            PathNode node = pm.carPath.GetNode(iClosest);
+            iNode = pm.carPath.GetClosestSpanIndex(car.transform.position);
+            PathNode node = pm.carPath.GetNode(iNode);
             pos = node.pos + Vector3.up * liftHeight;
             rot = node.rotation;
         }
@@ -145,8 +139,13 @@ public class CarRecovery : MonoBehaviour
         car.RequestFootBrake(0f);
 
         car.Set(pos, rot);
+        return iNode;
+    }
 
-        Debug.Log(string.Format("[CarRecovery] {0}: reset car to {1} via {2}",
-            reason, pos, usePath ? "nearest path node" : "spawn point"));
+    void ResetToNearestPathNode(Car car, string reason)
+    {
+        int iNode = ResetCarToNearestPathNode(car, liftHeight);
+        Debug.Log(string.Format("[CarRecovery] {0}: reset car via {1} (node {2})",
+            reason, iNode >= 0 ? "nearest path node" : "spawn point", iNode));
     }
 }
