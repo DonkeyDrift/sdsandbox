@@ -63,6 +63,11 @@ namespace tk
         bool bResetCar = false;
         bool bResetToNearest = false;
         bool bExitScene = false;
+        float savedTimeScale = 1f;
+        float syncFixedDt = 0.01f;
+        int pendingSteps = 0;
+        bool syncCapturePending = false;
+        int syncKickedFrame = 0;
 
         public enum State
         {
@@ -130,6 +135,12 @@ namespace tk
         {
             if (client != null && client.dispatcher != null)
                 client.dispatcher.Reset();
+
+            if (!asynchronous)
+            {
+                Physics.autoSimulation = true;
+                Time.timeScale = savedTimeScale;
+            }
         }
 
         void Disconnect()
@@ -159,6 +170,8 @@ namespace tk
         {
             if (client == null)
                 return;
+
+            frameId++;
 
             // 非 JPG 编码(Logger/PNG/TGA 场景)不在性能关键路径,走旧 JSONObject 路径
             if (camSensor.img_enc != "JPG")
@@ -449,6 +462,9 @@ namespace tk
                 car.RequestSteering(ai_steering);
                 car.RequestThrottle(ai_throttle);
                 car.RequestFootBrake(ai_brake);
+
+                if (!asynchronous)
+                    System.Threading.Interlocked.Increment(ref pendingSteps);
             }
             catch (Exception e)
             {
@@ -730,21 +746,29 @@ namespace tk
         void OnStepModeRecv(JSONObject json)
         {
             string step_mode = json.GetField("step_mode").str;
-            float _time_step = float.Parse(json.GetField("time_step").str);
-
-            Debug.Log("got settings");
+            float _time_step = NumField(json, "time_step", 0.05f);
 
             if (step_mode == "synchronous")
             {
-                Debug.Log("setting mode to synchronous");
                 asynchronous = false;
-                this.time_step = _time_step;
+                this.time_step = _time_step > 0f ? _time_step : 0.05f;
+                syncFixedDt = Time.fixedDeltaTime;
+                savedTimeScale = Time.timeScale;
                 Time.timeScale = 0.0f;
+                Physics.autoSimulation = false;
+                pendingSteps = 0;
+                syncCapturePending = false;
+                Debug.Log(string.Format("[TcpCarHandler] synchronous mode, time_step={0}", this.time_step));
+                Debug.LogWarning("[TcpCarHandler] synchronous mode is instance-global; use one RL client per sim instance");
             }
             else
             {
-                Debug.Log("setting mode to asynchronous");
                 asynchronous = true;
+                Physics.autoSimulation = true;
+                Time.timeScale = savedTimeScale;
+                pendingSteps = 0;
+                syncCapturePending = false;
+                Debug.Log("[TcpCarHandler] asynchronous mode");
             }
         }
 
@@ -806,89 +830,13 @@ namespace tk
             {
                 if (bResetCar)
                 {
-                    CarPath path = pm != null ? pm.carPath : null;
-                    bool randomReset = resetNodeIndex >= 0 || resetNodeMin > 0 || resetNodeMax >= 0
-                        || resetLateralOffset != 0f || resetHeadingNoise != 0f || resetSeed.HasValue;
-
-                    if (randomReset && path != null && path.nodes.Count > 0 && carComp0 != null)
-                    {
-                        int totalNodes = path.nodes.Count;
-                        int lo = Mathf.Clamp(resetNodeMin, 0, totalNodes - 1);
-                        int hi = resetNodeMax >= 0 ? Mathf.Min(resetNodeMax, totalNodes - 1) : totalNodes - 1;
-                        if (lo > hi)
-                            lo = hi;
-
-                        System.Random rng = resetSeed.HasValue ? new System.Random(resetSeed.Value) : new System.Random();
-                        int iNode = resetNodeIndex >= 0 ? Mathf.Clamp(resetNodeIndex, 0, totalNodes - 1) : rng.Next(lo, hi + 1);
-                        PathNode node = path.GetNode(iNode);
-
-                        float hNoise = 0f;
-                        if (resetHeadingNoise != 0f)
-                            hNoise = ((float)rng.NextDouble() * 2f - 1f) * resetHeadingNoise;
-
-                        Vector3 tangent = node.rotation * Vector3.forward;
-                        Vector3 right = Vector3.Cross(Vector3.up, tangent).normalized;
-                        Vector3 pos = node.pos + right * resetLateralOffset + Vector3.up * 0.4f;
-                        Quaternion rot = node.rotation * Quaternion.Euler(0f, hNoise, 0f);
-
-                        carComp0.rb.velocity = Vector3.zero;
-                        carComp0.rb.angularVelocity = Vector3.zero;
-                        carComp0.Set(pos, rot);
-
-                        car.RequestSteering(0.0f);
-                        car.RequestThrottle(0.0f);
-                        car.RequestFootBrake(10.0f);
-
-                        iActiveSpan = iNode;
-                        lapCount = 0;
-                        lastActiveNode = iNode;
-
-                        Debug.Log(string.Format("[TcpCarHandler] reset_car: random reset node {0} seed {1}",
-                            iNode, resetSeed.HasValue ? resetSeed.Value.ToString() : "time"));
-                    }
-                    else
-                    {
-                        car.RestorePosRot();
-
-                        if (carObj != null)
-                        {
-                            //reset last controls
-                            car.RequestSteering(0.0f);
-                            car.RequestThrottle(0.0f);
-                            car.RequestFootBrake(10.0f);
-
-                            // Reset closest point of car path
-                            if (pm)
-                                iActiveSpan = 0;
-                        }
-
-                        lapCount = 0;
-                        lastActiveNode = 0;
-                    }
-
+                    DoResetCar(false);
                     bResetCar = false;
                 }
 
                 if (bResetToNearest)
                 {
-                    int iNearest = -1;
-                    Car carComp = car as Car;
-                    if (carComp != null)
-                        iNearest = CarRecovery.ResetCarToNearestPathNode(carComp);
-
-                    if (carObj != null)
-                    {
-                        //reset last controls
-                        car.RequestSteering(0.0f);
-                        car.RequestThrottle(0.0f);
-                        car.RequestFootBrake(10.0f);
-
-                        // 遥测的最近路径点跟随复位目标,保持 cross-track 误差连续
-                        if (pm && iNearest >= 0)
-                            iActiveSpan = iNearest;
-                    }
-
-                    Debug.Log("[TcpCarHandler] reset_to_nearest: node " + iNearest);
+                    DoResetToNearest(false);
                     bResetToNearest = false;
                 }
 
@@ -914,13 +862,211 @@ namespace tk
             }
         }
 
+        void DoResetCar(bool immediate)
+        {
+            CarPath path = pm != null ? pm.carPath : null;
+            bool randomReset = resetNodeIndex >= 0 || resetNodeMin > 0 || resetNodeMax >= 0
+                || resetLateralOffset != 0f || resetHeadingNoise != 0f || resetSeed.HasValue;
+
+            if (randomReset && path != null && path.nodes.Count > 0 && carComp0 != null)
+            {
+                int totalNodes = path.nodes.Count;
+                int lo = Mathf.Clamp(resetNodeMin, 0, totalNodes - 1);
+                int hi = resetNodeMax >= 0 ? Mathf.Min(resetNodeMax, totalNodes - 1) : totalNodes - 1;
+                if (lo > hi)
+                    lo = hi;
+
+                System.Random rng = resetSeed.HasValue ? new System.Random(resetSeed.Value) : new System.Random();
+                int iNode = resetNodeIndex >= 0 ? Mathf.Clamp(resetNodeIndex, 0, totalNodes - 1) : rng.Next(lo, hi + 1);
+                PathNode node = path.GetNode(iNode);
+
+                float hNoise = 0f;
+                if (resetHeadingNoise != 0f)
+                    hNoise = ((float)rng.NextDouble() * 2f - 1f) * resetHeadingNoise;
+
+                Vector3 tangent = node.rotation * Vector3.forward;
+                Vector3 right = Vector3.Cross(Vector3.up, tangent).normalized;
+                Vector3 pos = node.pos + right * resetLateralOffset + Vector3.up * 0.4f;
+                Quaternion rot = node.rotation * Quaternion.Euler(0f, hNoise, 0f);
+
+                if (immediate)
+                    carComp0.SetImmediate(pos, rot, syncFixedDt, 2);
+                else
+                {
+                    carComp0.rb.velocity = Vector3.zero;
+                    carComp0.rb.angularVelocity = Vector3.zero;
+                    carComp0.Set(pos, rot);
+                }
+
+                car.RequestSteering(0.0f);
+                car.RequestThrottle(0.0f);
+                car.RequestFootBrake(10.0f);
+
+                iActiveSpan = iNode;
+                lapCount = 0;
+                lastActiveNode = iNode;
+
+                Debug.Log(string.Format("[TcpCarHandler] reset_car: random reset node {0} seed {1}",
+                    iNode, resetSeed.HasValue ? resetSeed.Value.ToString() : "time"));
+            }
+            else
+            {
+                if (immediate)
+                {
+                    Car cc = car as Car;
+                    if (cc != null)
+                        cc.SetImmediate(cc.startPos, cc.startRot, syncFixedDt, 2);
+                    else
+                        car.RestorePosRot();
+                }
+                else
+                {
+                    car.RestorePosRot();
+                }
+
+                if (carObj != null)
+                {
+                    //reset last controls
+                    car.RequestSteering(0.0f);
+                    car.RequestThrottle(0.0f);
+                    car.RequestFootBrake(10.0f);
+
+                    // Reset closest point of car path
+                    if (pm)
+                        iActiveSpan = 0;
+                }
+
+                lapCount = 0;
+                lastActiveNode = 0;
+            }
+        }
+
+        void DoResetToNearest(bool immediate)
+        {
+            int iNearest = -1;
+            Car carComp = car as Car;
+            if (carComp != null)
+                iNearest = CarRecovery.ResetCarToNearestPathNode(carComp, 0.4f, immediate);
+
+            if (carObj != null)
+            {
+                //reset last controls
+                car.RequestSteering(0.0f);
+                car.RequestThrottle(0.0f);
+                car.RequestFootBrake(10.0f);
+
+                // 遥测的最近路径点跟随复位目标,保持 cross-track 误差连续
+                if (pm && iNearest >= 0)
+                    iActiveSpan = iNearest;
+            }
+
+            Debug.Log("[TcpCarHandler] reset_to_nearest: node " + iNearest);
+        }
+
+        // ---- 同步步进(step_mode=synchronous) ----
+        // 进入:timeScale=0 + Physics.autoSimulation=false,FixedUpdate 不再运行;
+        // 每条 control 在主线程推进 time_step 秒物理,等相机回读完成后回一帧遥测。
+        // 物理是实例全局的,单 sim 实例只支持一个 RL 客户端(见进入时的警告日志)。
+        void SyncUpdate()
+        {
+            if (bResetCar)
+            {
+                DoResetCar(true);
+                bResetCar = false;
+                SyncPostReset();
+                return;
+            }
+
+            if (bResetToNearest)
+            {
+                DoResetToNearest(true);
+                bResetToNearest = false;
+                SyncPostReset();
+                return;
+            }
+
+            if (syncCapturePending)
+            {
+                if (camSensor != null)
+                {
+                    camSensor.Tick();
+                    if (camSensor.LastCompletedFrame >= syncKickedFrame)
+                    {
+                        syncCapturePending = false;
+                        SendTelemetry();
+                    }
+                }
+                else
+                {
+                    syncCapturePending = false;
+                    SendTelemetry();
+                }
+                return;
+            }
+
+            if (pendingSteps > 0)
+            {
+                System.Threading.Interlocked.Decrement(ref pendingSteps);
+                SyncStep();
+            }
+        }
+
+        void SyncStep()
+        {
+            if (carComp0 != null)
+                carComp0.ApplyRequests();
+
+            int k = Mathf.Max(1, Mathf.RoundToInt(time_step / syncFixedDt));
+            for (int i = 0; i < k; i++)
+                Physics.Simulate(syncFixedDt);
+
+            if (carComp0 != null)
+                carComp0.SyncKinematics(k * syncFixedDt);
+
+            KickSyncCapture();
+        }
+
+        void SyncPostReset()
+        {
+            if (carComp0 != null)
+                carComp0.ApplyRequests();
+
+            Physics.Simulate(syncFixedDt);
+            Physics.Simulate(syncFixedDt);
+
+            if (carComp0 != null)
+                carComp0.SyncKinematics(2f * syncFixedDt);
+
+            KickSyncCapture();
+        }
+
+        void KickSyncCapture()
+        {
+            if (camSensor != null)
+            {
+                camSensor.KickReadbackNow();
+                syncKickedFrame = camSensor.KickCount;
+                syncCapturePending = true;
+            }
+            else
+            {
+                SendTelemetry();
+            }
+        }
+
         void Update()
         {
             // 遥测发送节流放渲染循环:FixedUpdate 物理 100Hz、limitFPS 提到 60
             // 也发不满(相位错开);Update 跟随渲染帧率。帧率优先级:
             // --telemetry_fps(服务端强制,二分用) > cam_config fps 键 > 默认 20。
-            if (state != State.SendTelemetry || !asynchronous)
+            if (state != State.SendTelemetry)
                 return;
+
+            if (!asynchronous)
+            {
+                SyncUpdate();
+                return;
+            }
 
             if (controlTimeoutMs > 0f && !deadmanTriggered
                 && (DateTime.UtcNow - lastControlRecvTime).TotalMilliseconds > controlTimeoutMs)
@@ -941,7 +1087,6 @@ namespace tk
             if (timeSinceLastCapture >= 1.0f / effFps)
             {
                 timeSinceLastCapture -= (1.0f / effFps);
-                frameId++;
                 SendTelemetry();
                 NoteSend();
             }

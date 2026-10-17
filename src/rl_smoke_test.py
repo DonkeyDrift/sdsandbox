@@ -19,6 +19,9 @@ Checks:
   e. deadman: controls stop -> brake engages -> speed falls below 0.5
   f. collision impulse soft observation (printed, never fails)
   g. car still alive and streaming telemetry at the end
+  h. synchronous step mode: async stream stops, one control -> one frame,
+     speed rises across steps, deterministic reset+rollout, clean exit
+     back to async
 
 Exit code 0 iff all asserted checks pass.
 """
@@ -26,6 +29,7 @@ Exit code 0 iff all asserted checks pass.
 import argparse
 import json
 import math
+import select
 import socket
 import sys
 import time
@@ -42,11 +46,11 @@ class SimClient:
         self.sock.sendall((json.dumps(msg) + "\n").encode("utf-8"))
 
     def recv_json(self, timeout):
-        self.sock.settimeout(max(0.1, timeout))
-        try:
-            line = self.rfile.readline()
-        except socket.timeout:
+        # select 等待可读,避免 makefile 在 socket 超时后永久失效
+        r, _, _ = select.select([self.sock], [], [], max(0.1, timeout))
+        if not r:
             raise TimeoutError("no message from sim within %.1fs" % timeout)
+        line = self.rfile.readline()
         if not line:
             raise ConnectionError("sim closed the connection")
         line = line.strip()
@@ -272,6 +276,68 @@ def step_g_still_alive(c):
           "frame_id=%r" % t.get("frame_id"))
 
 
+def step_h_sync_mode(c):
+    print("\n-- h. synchronous step mode")
+    c.send({"msg_type": "step_mode", "step_mode": "synchronous", "time_step": "0.05"})
+    time.sleep(0.4)
+    drained = 0
+    try:
+        while True:
+            c.recv_json(0.1)
+            drained += 1
+            if drained > 200:
+                break
+    except TimeoutError:
+        pass
+    if drained:
+        info("drained %d in-flight async frame(s) before silence check" % drained)
+    try:
+        stray = c.recv_json(1.0)
+        check("h1 async telemetry stops in sync mode", False,
+              "got %r" % stray.get("msg_type"))
+    except TimeoutError:
+        check("h1 async telemetry stops in sync mode", True, "silent for 1.0s")
+
+    for _ in range(5):
+        send_control(c, throttle=1.0)
+    fids = []
+    speeds = []
+    deadline = time.monotonic() + 10.0
+    while len(fids) < 5 and time.monotonic() < deadline:
+        t = c.next_telemetry(timeout=max(0.5, deadline - time.monotonic()))
+        fids.append(t["frame_id"])
+        speeds.append(t["speed"])
+    check("h2 5 controls -> 5 telemetry frames", len(fids) == 5,
+          "got %d, frame_ids=%s" % (len(fids), fids))
+    ok = len(fids) == 5 and all(fids[i + 1] == fids[i] + 1 for i in range(len(fids) - 1))
+    check("h2b frame_id consecutive +1", ok, "frame_ids=%s" % fids)
+    ok = len(speeds) == 5 and speeds[-1] > speeds[0]
+    check("h3 speed rises across steps", ok,
+          "speeds=%s" % [round(s, 3) for s in speeds])
+
+    def sync_rollout():
+        c.send({"msg_type": "reset_car", "node_index": "10", "seed": "5"})
+        c.next_telemetry()  # reset answer frame
+        last = None
+        for _ in range(10):
+            send_control(c, steering=0.1, throttle=1.0)
+            last = c.next_telemetry()
+        return (last["pos_x"], last["pos_y"], last["pos_z"])
+
+    p1 = sync_rollout()
+    p2 = sync_rollout()
+    dp = math.dist(p1, p2)
+    check("h4 deterministic reset+rollout in sync mode", dp < 0.01,
+          "delta=%.5f p1=%s p2=%s" % (dp, p1, p2))
+
+    c.send({"msg_type": "step_mode", "step_mode": "asynchronous"})
+    frames = []
+    deadline = time.monotonic() + 1.5
+    while len(frames) < 3 and time.monotonic() < deadline:
+        frames.append(c.next_telemetry(timeout=max(0.3, deadline - time.monotonic())))
+    check("h5 async telemetry resumes", len(frames) >= 3, "got %d frames in 1.5s" % len(frames))
+
+
 def main():
     parser = argparse.ArgumentParser(description="RL P0 protocol smoke test for DonkeySim")
     parser.add_argument("--host", default="127.0.0.1")
@@ -296,6 +362,7 @@ def main():
         step_d_deterministic_reset(c)
         step_f_drive_and_observe_collisions(c)
         step_e_deadman(c)
+        step_h_sync_mode(c)
         step_g_still_alive(c)
     except (TimeoutError, ConnectionError, OSError, ValueError, KeyError) as e:
         check("harness: unexpected error", False, "%s: %s" % (type(e).__name__, e))

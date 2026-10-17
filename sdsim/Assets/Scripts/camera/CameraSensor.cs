@@ -36,10 +36,18 @@ public class CameraSensor : MonoBehaviour {
 	bool fallbackLogged;
 	Thread encodeThread;
 	readonly ManualResetEventSlim encodeWake = new ManualResetEventSlim(false);
-	readonly Queue<byte[]> jobs = new Queue<byte[]>();
+	readonly Queue<(byte[] rgb, int kick)> jobs = new Queue<(byte[] rgb, int kick)>();
 	readonly object jobsLock = new object();
 	readonly Queue<byte[]> bufferPool = new Queue<byte[]>();
 	volatile bool running = true;
+
+	// 回读帧计数:KickReadback 发起时 +1;该帧 RGB 拷包且编码交换完成后
+	// LastCompletedFrame 追到对应序号。同步步进按 KickCount>=目标 判断
+	// 「本次步进的图已可发」,编码在工作线程,序号随任务队列传递。
+	int kickCount;
+	int pendingKickSeq;
+	public int KickCount { get { return kickCount; } }
+	public volatile int LastCompletedFrame;
 
 	/// <summary>最近一次采包耗时(ms,主线程段),TelemetryStats 用。</summary>
 	public float LastCaptureMs { get; private set; }
@@ -98,6 +106,7 @@ public class CameraSensor : MonoBehaviour {
 			if (pendingReq.hasError)
 			{
 				readbackBroken = true;
+				LastCompletedFrame = pendingKickSeq;
 				pendingReq = default;
 				if (!fallbackLogged)
 				{
@@ -129,6 +138,7 @@ public class CameraSensor : MonoBehaviour {
 						rgb[d] = r; rgb[d + 1] = g; rgb[d + 2] = b;
 					}
 				}
+				int doneKick = pendingKickSeq;
 				pendingReq = default;
 
 				byte[] jpg = null;
@@ -136,12 +146,12 @@ public class CameraSensor : MonoBehaviour {
 					jpg = EncodeOnMainThread(rgb); // 无原生库:主线程编码(仍无 GPU 停顿)
 				else
 				{
-					lock (jobsLock) { jobs.Enqueue(rgb); }
+					lock (jobsLock) { jobs.Enqueue((rgb, doneKick)); }
 					encodeWake.Set();
 					EnsureEncodeThread();
 				}
 				if (jpg != null)
-					lock (jpgLock) { lastJpg = jpg; lastJpgLen = jpg.Length; }
+					lock (jpgLock) { lastJpg = jpg; lastJpgLen = jpg.Length; LastCompletedFrame = doneKick; }
 				// 主线程编码路径的 buffer 在 EncodeOnMainThread 内归还
 			}
 		}
@@ -154,13 +164,33 @@ public class CameraSensor : MonoBehaviour {
 	/// 不参与每帧自动渲染)——此前误判"冗余 Render"实为唯一出图路径,去掉会全黑。</summary>
 	void KickReadback()
 	{
-		if (readbackBroken || hasPending || ren == null)
+		KickReadbackInternal(false);
+	}
+
+	/// <summary>同步步进用:丢弃未完成的旧回读,立即重渲并发起新请求,
+	/// 保证完成的帧严格对应调用时刻的场景状态。</summary>
+	public void KickReadbackNow()
+	{
+		KickReadbackInternal(true);
+	}
+
+	void KickReadbackInternal(bool force)
+	{
+		if (readbackBroken || ren == null)
 			return;
+		if (hasPending)
+		{
+			if (!force)
+				return;
+			pendingReq = default;
+			hasPending = false;
+		}
 		try
 		{
 			sensorCam.Render();
 			pendingReq = UnityEngine.Rendering.AsyncGPUReadback.Request(ren);
 			hasPending = true;
+			pendingKickSeq = ++kickCount;
 		}
 		catch (System.Exception)
 		{
@@ -188,10 +218,11 @@ public class CameraSensor : MonoBehaviour {
 			while (true)
 			{
 				byte[] rgb = null;
+				int rgbKick = 0;
 				lock (jobsLock)
 				{
 					if (jobs.Count == 0) break;
-					rgb = jobs.Dequeue();
+					(rgb, rgbKick) = jobs.Dequeue();
 				}
 				// 双缓冲:编码写 jpgBack,完成后与已发布的 lastJpg 交换,
 				// 全程无每帧 byte[] 分配(dst 不足时 EncodeInto 才扩容,随内容收敛)。
@@ -201,6 +232,7 @@ public class CameraSensor : MonoBehaviour {
 					{
 						byte[] t = lastJpg; lastJpg = jpgBack; jpgBack = t;
 						lastJpgLen = len;
+						LastCompletedFrame = rgbKick;
 					}
 				ReturnBuffer(rgb);
 			}

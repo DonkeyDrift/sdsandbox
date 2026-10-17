@@ -132,7 +132,9 @@ namespace tk
             // Update our drop detection...
             if(_clientSocket != null && !IsDropped())
             {
-                time_check_dropped += Time.deltaTime;
+                // 用不受 timeScale 影响的时钟:同步步进(timeScale=0)下基于 deltaTime 的
+                // 检测会冻结,断线客户端永远无法回收(其 OnDestroy 还负责恢复全局物理)。
+                time_check_dropped += Time.unscaledDeltaTime;
 
                 if(!_clientSocket.Connected)
                 {
@@ -176,7 +178,12 @@ namespace tk
             
 
             if (recieved <= 0)
+            {
+                // 对端干净关闭(FIN):和异常路径一样只置标志,由主线程 Update 轮询回收,
+                // 不能静默 return——否则连接永久泄漏、断线回调永不触发。
+                dropped = true;
                 return;
+            }
 
             //Copy the recieved data into new buffer , to avoid null bytes
             byte[] recData = new byte[recieved];
