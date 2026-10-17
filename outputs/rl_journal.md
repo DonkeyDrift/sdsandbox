@@ -235,3 +235,28 @@ done 时 -10。实现于临时 fork env 包装（不改仓库代码，journal �
 - **S2-A 钻练取消**:seed-5003 非稳定失败而是方差,泛化堆里程(1M)已覆盖;
   改为让 S1b 跑完 1.5M 出终版候选,终验择优。PhysX MT 无法轻易关闭
   (Fixed Timestep 场景需重建场景),方差按评测口径吸收。
+
+### 2026-10-18 05:50 视觉训练中 sim 连接掉落(护栏正确 loud 失败)
+- 视觉异步 v3c 约 21k 步时 sim 连接断开,raise_on_stale 按设计抛 ConnectionError
+  杀死 worker(拒绝静默假步进)。离屏视觉 sim 长时运行第二次不稳定。
+- 处置:从 rl_ckpt_vision/ppo_20000 续训,目标 60k(约 50 分钟);若再断,视觉轨
+  以"管线已验证+基线模型"收束(报告骨架已按此定位)。
+
+### 2026-10-18 06:00 视觉 v4 重启(resume 路径不带 .zip)
+- v3c 实际到 ~27.5k 步(ckpt 在),resume 时传带 .zip 路径被 SB3 追加成 .zip.zip
+  (FileNotFoundError);传不带后缀路径即可。视觉 v4:27.5k→70k,约 55 分钟。
+- 护栏运行记录:视觉 sim 连接断开 → loud ConnectionError(设计正确)。
+
+### 2026-10-18 06:10 巡检(健康,纯等待)
+- S1b 1.31M/1.5M(约 10 分钟收尾);视觉 v4 从 27.5k 续训中。均无异常。
+
+### 2026-10-18 06:35 状态轨收束:champion2 保持冠军
+- S1b 终止(评测饱和后 eval 开销倒挂至 28fps,且 eval_len/eval_rew 已平台 30k+ 步)。
+- 终版候选(1.05M)10 局终验:avg 2274.3、crash 0.1、laps 36、rew 4099——
+  不及 champion2(1M:avg 2500.0/crash 0/laps 39/rew 4479),**champion2 维持冠军**
+  (两者差距部分属 PhysX 方差,但 champion2 指标全面占优)。
+- 状态轨正式收束。剩余:视觉 v4(27.5k→70k)完成后回填视觉报告 → 总报告 → complete。
+
+### 2026-10-18 06:45 champion2 第二组 held-out 满分(种子 6000-6009)
+- avg 2500.0(10/10 满)、crash 0.0、laps 40。两组共 20 episode 跨不相交种子域,
+  冠军稳定性证据链完整。状态轨报告已更新此批次。
