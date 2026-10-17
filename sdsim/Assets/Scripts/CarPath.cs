@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.AI;
@@ -38,6 +38,41 @@ public class CarPath
                 minDistanceIndex = i;
             }
         }
+        return minDistanceIndex;
+    }
+
+    // 带 hint 的局部搜索:车位置相对上次最近节点不会突变。hint>=0 时先搜
+    // [hint-window, hint+window](两端 clamp,不跨环);局部最优落在窗口边缘
+    // (最近点可能在窗外)或 hint<0 时回退全扫,保证结果与无参版一致。
+    public int GetClosestSpanIndex(Vector3 carPos, int hint, int window = 64)
+    {
+        int n = nodes.Count;
+        if (n == 0)
+            return -1;
+
+        if (hint < 0)
+            return GetClosestSpanIndex(carPos);
+
+        int lo = Mathf.Max(0, hint - window);
+        int hi = Mathf.Min(n - 1, hint + window);
+        if (lo > hi)
+            return GetClosestSpanIndex(carPos);
+
+        float minDistance = float.MaxValue;
+        int minDistanceIndex = -1;
+        for (int i = lo; i <= hi; i++)
+        {
+            float dist = Vector3.Distance(nodes[i].pos, carPos);
+            if (dist < minDistance)
+            {
+                minDistance = dist;
+                minDistanceIndex = i;
+            }
+        }
+
+        if (minDistanceIndex == lo || minDistanceIndex == hi)
+            return GetClosestSpanIndex(carPos);
+
         return minDistanceIndex;
     }
 

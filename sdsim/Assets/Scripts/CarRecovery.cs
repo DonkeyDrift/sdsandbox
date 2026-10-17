@@ -117,7 +117,7 @@ public class CarRecovery : MonoBehaviour
 
     // 回位核心:就近赛道中央摆正。返回所用路径节点 index,无路径返回 -1(此时已回出生点)。
     // 静态方法供 R 键/自动恢复与 TcpCarHandler 的 reset_to_nearest 消息共用。
-    public static int ResetCarToNearestPathNode(Car car, float liftHeight = 0.4f, bool immediate = false)
+    public static int ResetCarToNearestPathNode(Car car, float liftHeight = 0.4f, bool immediate = false, int hint = -1)
     {
         PathManager pm = FindObjectOfType<PathManager>();
         bool usePath = pm != null && pm.carPath != null && pm.carPath.nodes.Count > 0;
@@ -128,7 +128,7 @@ public class CarRecovery : MonoBehaviour
 
         if (usePath)
         {
-            iNode = pm.carPath.GetClosestSpanIndex(car.transform.position);
+            iNode = pm.carPath.GetClosestSpanIndex(car.transform.position, hint);
             PathNode node = pm.carPath.GetNode(iNode);
             pos = node.pos + Vector3.up * liftHeight;
             rot = node.rotation;

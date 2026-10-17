@@ -146,10 +146,9 @@ namespace tk
 
                     try
                     {
-                        // this is the minimal form of message for a JsonTCPClient
-                        string msg = "{}\n";
-                        System.Text.Encoding encoding = System.Text.Encoding.Default;
-                        _clientSocket.Send(encoding.GetBytes(msg));
+                        // this is the minimal form of message for a JsonTCPClient;
+                        // 经统一发送队列,与遥测并发写同一 socket 不会字节交错。
+                        SendData(System.Text.Encoding.Default.GetBytes("{}\n"));
                     }
                     catch(SocketException e)
                     {
@@ -207,12 +206,21 @@ namespace tk
 
         public bool SendData(byte[] data)
         {
+            if (data == null || data.Length == 0)
+                return false;
             if (!_clientSocket.Connected)
                 return false;
 
-            SocketAsyncEventArgs socketAsyncData = new SocketAsyncEventArgs();
-            socketAsyncData.SetBuffer(data, 0, data.Length);
-            _clientSocket.SendAsync(socketAsyncData);
+            // 统一走池化发送队列:同一 socket 上同步 Send 与线程池 BeginSend 并发
+            // 会在内核层字节交错(高负载下客户端收到撕裂 JSON)。队列保证同一时刻
+            // 只有一个未完成的发起。data 非池化缓冲,回收时 no-op,由 GC 释放。
+            lock (_pooledLock)
+            {
+                if (dropped)
+                    return false;
+                _pooledSendQueue.Enqueue(new KeyValuePair<byte[], int>(data, data.Length));
+                PumpPooledSendLocked();
+            }
 
             if (debug)
             {
@@ -324,7 +332,7 @@ namespace tk
                 _pooledSendInFlight = true;
                 try
                 {
-                    _clientSocket.BeginSend(item.Key, 0, item.Value, SocketFlags.None, PooledSendCallback, item.Key);
+                    _clientSocket.BeginSend(item.Key, 0, item.Value, SocketFlags.None, PooledSendCallback, item);
                 }
                 catch (Exception)
                 {
@@ -337,10 +345,15 @@ namespace tk
 
         void PooledSendCallback(IAsyncResult ar)
         {
-            byte[] buf = (byte[])ar.AsyncState;
+            KeyValuePair<byte[], int> item = (KeyValuePair<byte[], int>)ar.AsyncState;
+            byte[] buf = item.Key;
+            int total = 0;
             try
             {
-                _clientSocket.EndSend(ar);
+                total = _clientSocket.EndSend(ar);
+                // 高负载下 EndSend 可能只送达部分字节,必须补发剩余,否则客户端收到截断 JSON。
+                while (total < item.Value)
+                    total += _clientSocket.Send(buf, total, item.Value - total, SocketFlags.None);
             }
             catch (Exception)
             {

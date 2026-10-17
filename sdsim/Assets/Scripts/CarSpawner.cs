@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using tk;
@@ -231,6 +231,20 @@ public class CarSpawner : MonoBehaviour
 
         if (GlobalState.raceCameras)
         {
+            if (mainCamera != null) { mainCamera.SetActive(false); }
+            return;
+        }
+
+        // RL/headless(--rl):不生成观众分屏相机,GPU 全部留给各车 CameraSensor 遥测。
+        // 摄像头数不再与车数联动,单实例可挂任意多 TCP 客户端车。
+        if (GlobalState.rlMode)
+        {
+            if (cameras.Count > 0)
+            {
+                foreach (GameObject splitScreenCamGo in cameras)
+                    GameObject.Destroy(splitScreenCamGo);
+                cameras.Clear();
+            }
             if (mainCamera != null) { mainCamera.SetActive(false); }
             return;
         }

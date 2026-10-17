@@ -14,8 +14,17 @@ public static class BuildCommand
     public static void Build()
     {
         string outputPath = GetArg("-buildTargetStandaloneOSX");
+
+        BuildTarget target = BuildTarget.StandaloneOSX;
+        string targetArg = GetArg("-buildTarget");
+        if (!string.IsNullOrEmpty(targetArg) && !Enum.TryParse(targetArg, true, out target))
+        {
+            Console.WriteLine($"[BuildCommand] unknown -buildTarget '{targetArg}', fallback to StandaloneOSX");
+            target = BuildTarget.StandaloneOSX;
+        }
+
         if (string.IsNullOrEmpty(outputPath))
-            outputPath = "build/donkey_sim.app";
+            outputPath = target == BuildTarget.StandaloneOSX ? "build/donkey_sim.app" : "build/donkey_sim-" + target.ToString().ToLowerInvariant();
 
         BuildPlayerOptions opts = new BuildPlayerOptions
         {
@@ -26,7 +35,7 @@ public static class BuildCommand
                     System.Linq.Enumerable.Where(EditorBuildSettings.scenes, s => s.enabled),
                     s => s.path)),
             locationPathName = outputPath,
-            target = BuildTarget.StandaloneOSX,
+            target = target,
             options = BuildOptions.None,
         };
 

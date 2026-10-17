@@ -195,8 +195,11 @@ namespace tk
             TxAscii(",\"steering_angle\":"); TxNum(car.GetSteering() / steer_to_angle);
             TxAscii(",\"throttle\":"); TxNum(car.GetThrottle());
 
-            TxAscii(",\"image\":");
-            if (!TxBase64Image(camSensor)) { AbortTx(buf); SendTelemetryLegacy(); return; }
+            if (camSensor.captureEnabled)
+            {
+                TxAscii(",\"image\":");
+                if (!TxBase64Image(camSensor)) { AbortTx(buf); SendTelemetryLegacy(); return; }
+            }
 
             if (camSensorB != null && camSensorB.gameObject.activeInHierarchy)
             {
@@ -341,7 +344,8 @@ namespace tk
             json.AddField("steering_angle", car.GetSteering() / steer_to_angle);
             json.AddField("throttle", car.GetThrottle());
 
-            json.AddField("image", Convert.ToBase64String(camSensor.GetImageBytes()));
+            if (camSensor.captureEnabled)
+                json.AddField("image", Convert.ToBase64String(camSensor.GetImageBytes()));
 
             if (camSensorB != null && camSensorB.gameObject.activeInHierarchy)
             {
@@ -946,7 +950,7 @@ namespace tk
             int iNearest = -1;
             Car carComp = car as Car;
             if (carComp != null)
-                iNearest = CarRecovery.ResetCarToNearestPathNode(carComp, 0.4f, immediate);
+                iNearest = CarRecovery.ResetCarToNearestPathNode(carComp, 0.4f, immediate, iActiveSpan);
 
             if (carObj != null)
             {
@@ -987,7 +991,7 @@ namespace tk
 
             if (syncCapturePending)
             {
-                if (camSensor != null)
+                if (camSensor != null && camSensor.captureEnabled)
                 {
                     camSensor.Tick();
                     if (camSensor.LastCompletedFrame >= syncKickedFrame)
@@ -1042,7 +1046,7 @@ namespace tk
 
         void KickSyncCapture()
         {
-            if (camSensor != null)
+            if (camSensor != null && camSensor.captureEnabled)
             {
                 camSensor.KickReadbackNow();
                 syncKickedFrame = camSensor.KickCount;

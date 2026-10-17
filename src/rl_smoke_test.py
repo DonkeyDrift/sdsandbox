@@ -22,11 +22,14 @@ Checks:
   h. synchronous step mode: async stream stops, one control -> one frame,
      speed rises across steps, deterministic reset+rollout, clean exit
      back to async
+  i. no-image telemetry (img_enc="none"): state-only frames without image
+     key, switch back to JPG restores a decodable JPEG
 
 Exit code 0 iff all asserted checks pass.
 """
 
 import argparse
+import base64
 import json
 import math
 import select
@@ -40,7 +43,9 @@ STEP_TIMEOUT = 10.0
 class SimClient:
     def __init__(self, host, port):
         self.sock = socket.create_connection((host, port), timeout=STEP_TIMEOUT)
-        self.rfile = self.sock.makefile("r", encoding="utf-8", newline="\n")
+        # 二进制 makefile:文本模式(TextIOWrapper)的内部预读缓冲与 select 混用
+        # 曾观测到行损坏;二进制模式行边界可靠,出错时还能拿到原始字节诊断。
+        self.rfile = self.sock.makefile("rb")
 
     def send(self, msg):
         self.sock.sendall((json.dumps(msg) + "\n").encode("utf-8"))
@@ -50,13 +55,17 @@ class SimClient:
         r, _, _ = select.select([self.sock], [], [], max(0.1, timeout))
         if not r:
             raise TimeoutError("no message from sim within %.1fs" % timeout)
-        line = self.rfile.readline()
-        if not line:
+        raw = self.rfile.readline()
+        if not raw:
             raise ConnectionError("sim closed the connection")
-        line = line.strip()
-        if not line:
+        raw = raw.strip()
+        if not raw:
             return self.recv_json(timeout)
-        return json.loads(line)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise ValueError("corrupt line len=%d head=%r tail=%r (%s)" %
+                             (len(raw), raw[:90], raw[-40:], e))
 
     def wait_for(self, msg_type, timeout=STEP_TIMEOUT):
         deadline = time.monotonic() + timeout
@@ -338,6 +347,51 @@ def step_h_sync_mode(c):
     check("h5 async telemetry resumes", len(frames) >= 3, "got %d frames in 1.5s" % len(frames))
 
 
+def step_i_no_image(c):
+    print("\n-- i. no-image telemetry mode")
+    none_cfg = {"msg_type": "cam_config",
+                "fov": "150", "fish_eye_x": "0.0", "fish_eye_y": "0.0",
+                "img_w": "160", "img_h": "120", "img_d": "3", "img_enc": "none",
+                "offset_x": "0.0", "offset_y": "3.0", "offset_z": "0.0", "rot_x": "90.0"}
+    jpg_cfg = dict(none_cfg, img_enc="JPG")
+
+    c.send(none_cfg)
+    state_frames = []
+    deadline = time.monotonic() + 5.0
+    # 切换生效前的在途帧仍带 image,丢弃到第一帧无图状态帧为止
+    while time.monotonic() < deadline:
+        msg = c.next_telemetry(timeout=max(0.5, deadline - time.monotonic()))
+        if "image" not in msg:
+            state_frames.append(msg)
+            break
+    while len(state_frames) < 3 and time.monotonic() < deadline:
+        state_frames.append(c.next_telemetry(timeout=max(0.5, deadline - time.monotonic())))
+    ok = len(state_frames) == 3 and all("image" not in f for f in state_frames)
+    check("i1 no image key in state-only frames", ok,
+          "got %d frames, with_image=%d" % (len(state_frames), sum("image" in f for f in state_frames)))
+    fids = [f.get("frame_id") for f in state_frames]
+    ok = len(fids) == 3 and all(fids[i + 1] == fids[i] + 1 for i in range(len(fids) - 1))
+    check("i2 frame_id still consecutive", ok, "frame_ids=%s" % fids)
+
+    c.send(jpg_cfg)
+    img_frame = None
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        msg = c.next_telemetry(timeout=max(0.5, deadline - time.monotonic()))
+        if "image" in msg:
+            img_frame = msg
+            break
+    check("i3 image key returns after switching back to JPG", img_frame is not None)
+    if img_frame is not None:
+        try:
+            data = base64.b64decode(img_frame["image"])
+            check("i4 image decodes to JPEG (FF D8 header)", data[:2] == b"\xff\xd8",
+                  "header=%s len=%d" % (data[:2].hex(), len(data)))
+        except Exception as e:
+            check("i4 image decodes to JPEG (FF D8 header)", False,
+                  "%s: %s" % (type(e).__name__, e))
+
+
 def main():
     parser = argparse.ArgumentParser(description="RL P0 protocol smoke test for DonkeySim")
     parser.add_argument("--host", default="127.0.0.1")
@@ -363,6 +417,7 @@ def main():
         step_f_drive_and_observe_collisions(c)
         step_e_deadman(c)
         step_h_sync_mode(c)
+        step_i_no_image(c)
         step_g_still_alive(c)
     except (TimeoutError, ConnectionError, OSError, ValueError, KeyError) as e:
         check("harness: unexpected error", False, "%s: %s" % (type(e).__name__, e))

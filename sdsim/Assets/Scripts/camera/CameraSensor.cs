@@ -11,6 +11,7 @@ public class CameraSensor : MonoBehaviour {
 	public int height = 256;
 	public int depth = 3;
 	public string img_enc = "JPG"; //accepts JPG, PNG, TGA
+	public bool captureEnabled = true; //cam_config img_enc="none" 时置 false:零渲染零回读零编码,遥测只发状态量
 	Texture2D tex;
 	RenderTexture ren;
 	Rect ImageRect;
@@ -70,6 +71,8 @@ public class CameraSensor : MonoBehaviour {
 		if(_img_enc.Length == 3)
 			img_enc = _img_enc;
 
+		captureEnabled = _img_enc != "none";
+
 		if(offset_x != 0.0f || offset_y != 0.0f || offset_z != 0.0f)
 			transform.localPosition = new Vector3(offset_x, offset_y, offset_z);
 
@@ -98,6 +101,9 @@ public class CameraSensor : MonoBehaviour {
 	/// <summary>主线程每帧调用(TcpCarHandler.Update):轮询回读结果、喂编码线程。</summary>
 	public void Tick()
 	{
+		if (!captureEnabled)
+			return;
+
 		float t0 = Time.realtimeSinceStartup * 1000f;
 
 		if (hasPending && pendingReq.done)
@@ -176,7 +182,7 @@ public class CameraSensor : MonoBehaviour {
 
 	void KickReadbackInternal(bool force)
 	{
-		if (readbackBroken || ren == null)
+		if (!captureEnabled || readbackBroken || ren == null)
 			return;
 		if (hasPending)
 		{
