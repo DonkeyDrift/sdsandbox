@@ -51,6 +51,8 @@ def parse_args():
     parser.add_argument("--time-step", type=float, default=0.05, help="同步步进步长(秒)")
     parser.add_argument("--spawn", dest="spawn", action="store_true", default=True, help="随机出生到赛道节点(默认)")
     parser.add_argument("--no-spawn", dest="spawn", action="store_false", help="复位回出生点")
+    parser.add_argument("--spawn-lateral", type=float, default=1.0, help="出生横向偏移幅度(米,救车课程用 1.8)")
+    parser.add_argument("--spawn-heading", type=float, default=8.0, help="出生朝向噪声(度)")
     parser.add_argument("--max-cte", type=float, default=2.5, help="出界 cross-track 误差阈值")
     parser.add_argument("--seed", type=int, default=1, help="训练/出生随机种子")
     parser.add_argument("--save", default=None, help="最终模型保存路径(默认 outputs/rl_<algo>.zip)")
@@ -80,6 +82,7 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
         }
         if not args.state_obs:
             conf["cam_resolution"] = (120, 160, 3)
+            conf["headless_keep_gfx"] = True  # 视觉用 -batchmode 离屏渲染:无窗口、无遮挡休眠
         env = gym.make("donkey-mountain-track-v0", conf=conf)
         if time_limit:
             # 本环境不自带步数上限(只 terminated 不 truncated);EvalCallback 的
@@ -92,7 +95,8 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
 
 def main():
     args = parse_args()
-    spawn_cfg = dict(SPAWN_DEFAULT) if args.spawn else None
+    spawn_cfg = {"node_min": 5, "node_max": 245,
+                 "lateral_offset": args.spawn_lateral, "heading_noise": args.spawn_heading} if args.spawn else None
     save_path = args.save or ("outputs/rl_%s.zip" % args.algo)
     if args.resume and os.path.abspath(save_path) == os.path.abspath(args.resume):
         # 续训时默认保存路径与来源相同会把结果写回源文件;一旦中途/末尾保存,
