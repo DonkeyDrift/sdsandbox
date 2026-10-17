@@ -44,6 +44,8 @@ def parse_args():
     parser.add_argument("--seed-base", type=int, default=None,
                         help="held-out 种子基数:第 i 局用 seed_base+i(训练未覆盖的种子域)")
     parser.add_argument("--json", action="store_true", help="末行输出机器可读 JSON 汇总")
+    parser.add_argument("--action-repeat", type=int, default=1,
+                        help="每个动作连续保持 N 个环境步:异步模式对齐训练的 0.05s 动作时长语义")
     parser.add_argument("--cam-fps", type=float, default=0.0,
                         help="异步评测遥测/控制频率(Hz,0=默认20):60Hz 连续控制可消除冠军的高增益失稳")
     return parser.parse_args()
@@ -80,9 +82,14 @@ def main():
         total, steps, reason = 0.0, 0, "max_steps"
         while steps < args.max_steps:
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = env.step(action)
-            total += reward
-            steps += 1
+            for _ in range(args.action_repeat):
+                if steps >= args.max_steps:
+                    break
+                obs, reward, terminated, truncated, info = env.step(action)
+                total += reward
+                steps += 1
+                if terminated or truncated:
+                    break
             if terminated:
                 reason = "terminated(cte=%.2f hit=%s flipped=%s stuck=%.1f lap=%d pos=%s)" % (
                     info.get("cte", 0), info.get("hit"), info.get("flipped"),

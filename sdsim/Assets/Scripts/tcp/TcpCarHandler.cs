@@ -762,6 +762,10 @@ namespace tk
                 Physics.autoSimulation = false;
                 pendingSteps = 0;
                 syncCapturePending = false;
+                // 手动 Simulate + timeScale=0 下 Unity 插值时钟不推进,开着会让
+                // 车身相对真实姿态逐步振荡(实测恶化)——同步模式必须关。
+                if (carComp0 != null && carComp0.rb != null)
+                    carComp0.rb.interpolation = RigidbodyInterpolation.None;
                 Debug.Log(string.Format("[TcpCarHandler] synchronous mode, time_step={0}", this.time_step));
                 Debug.LogWarning("[TcpCarHandler] synchronous mode is instance-global; use one RL client per sim instance");
             }
@@ -772,6 +776,9 @@ namespace tk
                 Time.timeScale = savedTimeScale;
                 pendingSteps = 0;
                 syncCapturePending = false;
+                // 恢复常规渲染插值(异步连续物理下消除跳步感)
+                if (carComp0 != null && carComp0.rb != null)
+                    carComp0.rb.interpolation = RigidbodyInterpolation.Interpolate;
                 Debug.Log("[TcpCarHandler] asynchronous mode");
             }
         }
