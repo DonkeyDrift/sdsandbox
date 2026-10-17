@@ -81,6 +81,14 @@ public class CarRecovery : MonoBehaviour
             return;
         }
 
+        tk.TcpCarHandler handler = car.GetComponentInChildren<tk.TcpCarHandler>();
+        if (handler != null && handler.RlMode)
+        {
+            stuckTimer = 0f;
+            flipTimer = 0f;
+            return;
+        }
+
         // 卡护栏:有油门意图但车几乎不动;松油门即重置计时,正常停车不误伤
         bool wantsMove = Mathf.Abs(car.requestTorque) > stuckThrottle;
         bool barelyMoving = car.rb.velocity.magnitude < minStuckSpeed;

@@ -43,6 +43,21 @@ namespace tk
 
         int iActiveSpan = 0;
 
+        public bool RlMode { get; private set; }
+        float controlTimeoutMs = 0f;
+        DateTime lastControlRecvTime = DateTime.UtcNow;
+        bool deadmanTriggered = false;
+        uint frameId = 0;
+        int lapCount = 0;
+        int lastActiveNode = -1;
+        int resetNodeIndex = -1;
+        int resetNodeMin = 0;
+        int resetNodeMax = -1;
+        float resetLateralOffset = 0f;
+        float resetHeadingNoise = 0f;
+        int? resetSeed = null;
+        Car carComp0;
+
         bool asynchronous = true;
         float time_step = 0.1f;
         bool bResetCar = false;
@@ -61,6 +76,7 @@ namespace tk
         {
             car = carObj.GetComponent<ICar>();
             conf = carObj.GetComponent<CarConfig>();
+            carComp0 = car as Car;
             pm = GameObject.FindObjectOfType<PathManager>();
             carSpawner = GameObject.FindObjectOfType<CarSpawner>();
             Canvas canvas = GameObject.FindObjectOfType<Canvas>();
@@ -96,6 +112,7 @@ namespace tk
             client.dispatcher.Register("lidar_config", new tk.Delegates.OnMsgRecv(OnLidarConfig));
             client.dispatcher.Register("set_position", new tk.Delegates.OnMsgRecv(OnSetPosition));
             client.dispatcher.Register("node_position", new tk.Delegates.OnMsgRecv(OnNodePositionRecv));
+            client.dispatcher.Register("time_scale", new tk.Delegates.OnMsgRecv(OnTimeScaleRecv));
         }
 
         public void Start()
@@ -187,6 +204,14 @@ namespace tk
 
             TxAscii(",\"hit\":\""); TxAscii(car.GetLastCollision()); TxAscii("\"");
             car.ClearLastCollision();
+
+            TxAscii(",\"frame_id\":"); TxAscii(frameId.ToString(CultureInfo.InvariantCulture));
+            float collImpulse = carComp0 != null ? carComp0.LastCollisionImpulse : 0f;
+            if (carComp0 != null) carComp0.ClearLastCollisionImpulse();
+            TxAscii(",\"collision_impulse\":"); TxNum(collImpulse);
+            TxAscii(",\"flipped\":"); TxAscii(carComp0 != null && carComp0.IsFlipped ? "true" : "false");
+            TxAscii(",\"stuck_time\":"); TxNum(carComp0 != null ? carComp0.StuckTime : 0f);
+
             TxAscii(",\"time\":"); TxNum(Time.timeSinceLevelLoad);
 
             Vector3 velocity = car.GetVelocity() / 8.0f;
@@ -215,7 +240,12 @@ namespace tk
                 if (GlobalState.extendedTelemetry) { TxAscii(",\"cte\":"); TxNum(cte); }
 
                 TxAscii(",\"activeNode\":"); TxNum(iActiveSpan);
-                TxAscii(",\"totalNodes\":"); TxNum(pm.carPath.nodes.Count);
+                int totalNodes = pm.carPath.nodes.Count;
+                TxAscii(",\"totalNodes\":"); TxNum(totalNodes);
+
+                if (totalNodes > 0 && lastActiveNode > totalNodes * 0.9f && iActiveSpan < totalNodes * 0.1f)
+                    lapCount++;
+                lastActiveNode = iActiveSpan;
             }
 
             // not intended to use in races, just to train
@@ -230,6 +260,7 @@ namespace tk
                 TxAscii(",\"vel_y\":"); TxNum(velocity.y);
                 TxAscii(",\"vel_z\":"); TxNum(velocity.z);
             }
+            TxAscii(",\"lap\":"); TxNum(lapCount);
             TxAscii("}\n");
 
             if (_txOverflow)
@@ -317,6 +348,14 @@ namespace tk
 
             json.AddField("hit", car.GetLastCollision());
             car.ClearLastCollision();
+
+            json.AddField("frame_id", (int)frameId);
+            float collImpulse = carComp0 != null ? carComp0.LastCollisionImpulse : 0f;
+            if (carComp0 != null) carComp0.ClearLastCollisionImpulse();
+            json.AddField("collision_impulse", collImpulse);
+            json.AddField("flipped", carComp0 != null && carComp0.IsFlipped);
+            json.AddField("stuck_time", carComp0 != null ? carComp0.StuckTime : 0f);
+
             json.AddField("time", Time.timeSinceLevelLoad);
 
             Vector3 velocity = car.GetVelocity() / 8.0f;
@@ -345,7 +384,12 @@ namespace tk
                 if (GlobalState.extendedTelemetry) { json.AddField("cte", cte); }
 
                 json.AddField("activeNode", iActiveSpan);
-                json.AddField("totalNodes", pm.carPath.nodes.Count);
+                int totalNodes = pm.carPath.nodes.Count;
+                json.AddField("totalNodes", totalNodes);
+
+                if (totalNodes > 0 && lastActiveNode > totalNodes * 0.9f && iActiveSpan < totalNodes * 0.1f)
+                    lapCount++;
+                lastActiveNode = iActiveSpan;
             }
 
             // not intended to use in races, just to train
@@ -360,6 +404,7 @@ namespace tk
                 json.AddField("vel_y", velocity.y);
                 json.AddField("vel_z", velocity.z);
             }
+            json.AddField("lap", lapCount);
             client.SendMsg(json);
         }
 
@@ -388,6 +433,9 @@ namespace tk
         {
             try
             {
+                lastControlRecvTime = DateTime.UtcNow;
+                deadmanTriggered = false;
+
                 ai_steering = float.Parse(json["steering"].str, CultureInfo.InvariantCulture.NumberFormat);
                 ai_throttle = float.Parse(json["throttle"].str, CultureInfo.InvariantCulture.NumberFormat);
                 ai_brake = float.Parse(json["brake"].str, CultureInfo.InvariantCulture.NumberFormat);
@@ -420,9 +468,47 @@ namespace tk
             SceneManager.LoadSceneAsync("menu");
         }
 
+        // RL 客户端常发未加引号的 JSON 数字(NUMBER 型 .str 为 null),字符串/数字两种都要能收。
+        static float NumField(JSONObject json, string name, float defVal)
+        {
+            JSONObject f = json.GetField(name);
+            if (f == null)
+                return defVal;
+            if (f.str != null)
+            {
+                float v;
+                if (float.TryParse(f.str, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
+                    return v;
+                return defVal;
+            }
+            return f.IsNumber ? (float)f.n : defVal;
+        }
+
         void OnResetCarRecv(JSONObject json)
         {
+            resetNodeIndex = -1;
+            resetNodeMin = 0;
+            resetNodeMax = -1;
+            resetLateralOffset = 0f;
+            resetHeadingNoise = 0f;
+            resetSeed = null;
+
+            resetNodeIndex = (int)NumField(json, "node_index", -1f);
+            resetNodeMin = (int)NumField(json, "node_min", 0f);
+            resetNodeMax = (int)NumField(json, "node_max", -1f);
+            resetLateralOffset = NumField(json, "lateral_offset", 0f);
+            resetHeadingNoise = NumField(json, "heading_noise", 0f);
+            if (json.HasField("seed"))
+                resetSeed = (int)NumField(json, "seed", 0f);
+
             bResetCar = true;
+        }
+
+        void OnTimeScaleRecv(JSONObject json)
+        {
+            float v = NumField(json, "time_scale", 1.0f);
+            v = clamp(v, 0.1f, 4.0f);
+            Time.timeScale = v;
         }
 
         // 就近回位到赛道中央并摆正(与本地 R 键同一逻辑,见 CarRecovery)。
@@ -478,6 +564,9 @@ namespace tk
             int body_b = int.Parse(json.GetField("body_b").str);
             string car_name = json.GetField("car_name").str;
             int font_size = 100;
+
+            RlMode = GlobalState.rlMode || (int)NumField(json, "rl_mode", 0f) == 1;
+            controlTimeoutMs = NumField(json, "control_timeout_ms", 0f);
 
             if (json.GetField("font_size") != null)
                 font_size = int.Parse(json.GetField("font_size").str);
@@ -675,7 +764,7 @@ namespace tk
 
         public void OnNodePositionRecv(JSONObject json)
         {
-            int index = int.Parse(json.GetField("index").str);
+            int index = (int)NumField(json, "index", -1f);
             if (pm != null && index >= 0 && index < pm.carPath.nodes.Count)
             {
                 PathNode node = pm.carPath.nodes[index];
@@ -717,18 +806,64 @@ namespace tk
             {
                 if (bResetCar)
                 {
-                    car.RestorePosRot();
+                    CarPath path = pm != null ? pm.carPath : null;
+                    bool randomReset = resetNodeIndex >= 0 || resetNodeMin > 0 || resetNodeMax >= 0
+                        || resetLateralOffset != 0f || resetHeadingNoise != 0f || resetSeed.HasValue;
 
-                    if (carObj != null)
+                    if (randomReset && path != null && path.nodes.Count > 0 && carComp0 != null)
                     {
-                        //reset last controls
+                        int totalNodes = path.nodes.Count;
+                        int lo = Mathf.Clamp(resetNodeMin, 0, totalNodes - 1);
+                        int hi = resetNodeMax >= 0 ? Mathf.Min(resetNodeMax, totalNodes - 1) : totalNodes - 1;
+                        if (lo > hi)
+                            lo = hi;
+
+                        System.Random rng = resetSeed.HasValue ? new System.Random(resetSeed.Value) : new System.Random();
+                        int iNode = resetNodeIndex >= 0 ? Mathf.Clamp(resetNodeIndex, 0, totalNodes - 1) : rng.Next(lo, hi + 1);
+                        PathNode node = path.GetNode(iNode);
+
+                        float hNoise = 0f;
+                        if (resetHeadingNoise != 0f)
+                            hNoise = ((float)rng.NextDouble() * 2f - 1f) * resetHeadingNoise;
+
+                        Vector3 tangent = node.rotation * Vector3.forward;
+                        Vector3 right = Vector3.Cross(Vector3.up, tangent).normalized;
+                        Vector3 pos = node.pos + right * resetLateralOffset + Vector3.up * 0.4f;
+                        Quaternion rot = node.rotation * Quaternion.Euler(0f, hNoise, 0f);
+
+                        carComp0.rb.velocity = Vector3.zero;
+                        carComp0.rb.angularVelocity = Vector3.zero;
+                        carComp0.Set(pos, rot);
+
                         car.RequestSteering(0.0f);
                         car.RequestThrottle(0.0f);
                         car.RequestFootBrake(10.0f);
 
-                        // Reset closest point of car path
-                        if (pm)
-                            iActiveSpan = 0;
+                        iActiveSpan = iNode;
+                        lapCount = 0;
+                        lastActiveNode = iNode;
+
+                        Debug.Log(string.Format("[TcpCarHandler] reset_car: random reset node {0} seed {1}",
+                            iNode, resetSeed.HasValue ? resetSeed.Value.ToString() : "time"));
+                    }
+                    else
+                    {
+                        car.RestorePosRot();
+
+                        if (carObj != null)
+                        {
+                            //reset last controls
+                            car.RequestSteering(0.0f);
+                            car.RequestThrottle(0.0f);
+                            car.RequestFootBrake(10.0f);
+
+                            // Reset closest point of car path
+                            if (pm)
+                                iActiveSpan = 0;
+                        }
+
+                        lapCount = 0;
+                        lastActiveNode = 0;
                     }
 
                     bResetCar = false;
@@ -772,7 +907,7 @@ namespace tk
                     timeSinceLastMoved = 0.0f;
                     lastPos = currentPos;
                 }
-                if (timeSinceLastMoved >= GlobalState.timeOut && carSpawner != null)
+                if (!RlMode && GlobalState.timeOut > 0f && timeSinceLastMoved >= GlobalState.timeOut && carSpawner != null)
                 {
                     Boot();
                 }
@@ -787,6 +922,15 @@ namespace tk
             if (state != State.SendTelemetry || !asynchronous)
                 return;
 
+            if (controlTimeoutMs > 0f && !deadmanTriggered
+                && (DateTime.UtcNow - lastControlRecvTime).TotalMilliseconds > controlTimeoutMs)
+            {
+                car.RequestSteering(0.0f);
+                car.RequestThrottle(0.0f);
+                car.RequestFootBrake(1.0f);
+                deadmanTriggered = true;
+            }
+
             if (camSensor != null)
                 camSensor.Tick();
             if (camSensorB != null)
@@ -797,6 +941,7 @@ namespace tk
             if (timeSinceLastCapture >= 1.0f / effFps)
             {
                 timeSinceLastCapture -= (1.0f / effFps);
+                frameId++;
                 SendTelemetry();
                 NoteSend();
             }

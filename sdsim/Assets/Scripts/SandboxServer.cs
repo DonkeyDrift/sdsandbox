@@ -52,6 +52,14 @@ public class SandboxServer : MonoBehaviour
                 {
                     GlobalState.vsync_count = int.Parse(args[i + 1]);
                 }
+                else if (args[i] == "--rl")
+                {
+                    GlobalState.rlMode = true;
+                }
+                else if (args[i] == "--idle_timeout")
+                {
+                    GlobalState.timeOut = float.Parse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture.NumberFormat);
+                }
             }
         }
 
@@ -74,6 +82,9 @@ public class SandboxServer : MonoBehaviour
     void Start()
     {
         CheckCommandLineConnectArgs();
+
+        if (GlobalState.rlMode && !privateAPI)
+            Debug.Log("[SandboxServer] rl mode enabled");
 
         // 画质/垂直同步命令行覆盖(二分开关;工程默认档 5=Ultra,见 QualitySettings)
         if (GlobalState.quality_level >= 0)

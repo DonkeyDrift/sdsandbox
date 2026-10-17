@@ -43,4 +43,5 @@ public static class GlobalState
     // quality_level/vsync_count: >=0 时启动即覆盖画质档/垂直同步(-1=不动,用工程默认)
     public static int quality_level = -1;
     public static int vsync_count = -1;
+    public static bool rlMode = false;
 }

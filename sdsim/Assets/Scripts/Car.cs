@@ -42,6 +42,9 @@ public class Car : MonoBehaviour, ICar{
 
 	//name of the last object we hit.
 	public string last_collision = "none";
+	public float last_collision_impulse = 0f;
+
+	float stuckTimer = 0f;
 
 
 	// Use this for initialization
@@ -229,6 +232,11 @@ public class Car : MonoBehaviour, ICar{
 			wc.brakeTorque = brake;
 		}
 
+		if (Mathf.Abs(requestTorque) > 0.1f && rb.velocity.magnitude < 0.5f)
+			stuckTimer += Time.fixedDeltaTime;
+		else
+			stuckTimer = 0f;
+
 	}
 
 	void FlipUpright()
@@ -266,8 +274,29 @@ public class Car : MonoBehaviour, ICar{
 		last_collision = "none";
 	}
 
+	public float LastCollisionImpulse
+	{
+		get { return last_collision_impulse; }
+	}
+
+	public void ClearLastCollisionImpulse()
+	{
+		last_collision_impulse = 0f;
+	}
+
+	public bool IsFlipped
+	{
+		get { return Vector3.Dot(transform.up, Vector3.up) < 0.2f; }
+	}
+
+	public float StuckTime
+	{
+		get { return stuckTimer; }
+	}
+
 	void OnCollisionEnter(Collision col)
 	{
 		last_collision = col.gameObject.name;
+		last_collision_impulse = col.impulse.magnitude;
 	}
 }

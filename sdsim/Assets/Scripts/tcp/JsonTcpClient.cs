@@ -91,12 +91,13 @@ namespace tk
             }
         }
 
-        // Over simplified algorithm to extract json payload from TCP stream. It assumes that there are no nested JSON objects
+        // Extract complete json objects from the TCP stream. Objects are '{'...'}' with
+        // no braces inside string values (protocol assumption), '\n' is an optional
+        // terminator: both newline-terminated and bare '}'-terminated streams are accepted,
+        // and arbitrarily segmented/coalesced TCP chunks never lose or wedge messages.
         List<string> ExtractJsonFromStream()
         {
             List<string> result = new List<string>();
-            string jsonBuffer = "";
-            string[] jsonMessages;
 
             //Ignore request if TCP buffer list is empty
             if (recv_packets.Count == 0) {
@@ -104,38 +105,35 @@ namespace tk
             }
 
             // Concat all reveiced TCP buffers to have change to extract as much as possible JSON objects
-            foreach(string str in recv_packets)
-            {
-                jsonBuffer = String.Concat (jsonBuffer, str);
-            }
-
+            string jsonBuffer = string.Concat(recv_packets);
             recv_packets.Clear();
 
-            // Split data received on each json object delimitor 
-            jsonMessages = jsonBuffer.Split("{"[0]); 
+            while (jsonBuffer.Length > 0)
+            {
+                int open = jsonBuffer.IndexOf('{');
+                if (open < 0)
+                    break; // no object start in the remainder, drop it
 
-            for (int i = 0; i < jsonMessages.Length; i++) {
-                // Ignore empty parts, this is likely side effect of Split
-                if (jsonMessages[i].Length == 0)
-                {
-                    continue;
-                }
-                // Since split remove delimitor, add it back to keep JSON structure
-                string theMessage = jsonMessages[i].Insert(0, "{");
-                // If JSON message is complete, add to list of complete JSON message
-                if (theMessage[0]=='{' && theMessage.Substring(theMessage.Length - 1)[0]=='}') 
-                {
-                    result.Add(theMessage);
-                } else {
-                    if (i==(jsonMessages.Length-1)) {
-                        //last message is a partial one, push back to recv_packets
-                        recv_packets.Add (theMessage);
-                    } else {
-                        Debug.Log("Unexpected partial JSON object in the middle of the TCP buffer !, buffer = "+jsonBuffer);                    
-                    }
-                }
-                
+                if (open > 0)
+                    jsonBuffer = jsonBuffer.Substring(open);
+
+                int close = jsonBuffer.IndexOf('}');
+                if (close < 0)
+                    break; // half of an object, wait for the next chunk
+
+                result.Add(jsonBuffer.Substring(0, close + 1));
+
+                jsonBuffer = jsonBuffer.Substring(close + 1);
+                if (jsonBuffer.StartsWith("\r\n"))
+                    jsonBuffer = jsonBuffer.Substring(2);
+                else if (jsonBuffer.StartsWith("\n"))
+                    jsonBuffer = jsonBuffer.Substring(1);
             }
+
+            //last message is a partial one, push back to recv_packets
+            if (jsonBuffer.Length > 0)
+                recv_packets.Add(jsonBuffer);
+
             return result;
         }
 
