@@ -51,6 +51,13 @@ public class Car : MonoBehaviour, ICar{
 	void Awake () 
 	{
 		rb = GetComponent<Rigidbody>();
+		if (rb)
+		{
+			// 渲染插值:物理步进(尤其同步步进手动 Simulate 的突发推进)之间,
+			// 渲染姿态在上/当前两帧物理姿态间平滑过渡——消除车辆"跳步感"。
+			// 异步模式(timeScale=1)下等同常规游戏的惯用设置。
+			rb.interpolation = RigidbodyInterpolation.Interpolate;
+		}
 
 		if(rb && centrOfMass)
 		{

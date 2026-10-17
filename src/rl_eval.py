@@ -44,6 +44,8 @@ def parse_args():
     parser.add_argument("--seed-base", type=int, default=None,
                         help="held-out 种子基数:第 i 局用 seed_base+i(训练未覆盖的种子域)")
     parser.add_argument("--json", action="store_true", help="末行输出机器可读 JSON 汇总")
+    parser.add_argument("--cam-fps", type=float, default=0.0,
+                        help="异步评测遥测/控制频率(Hz,0=默认20):60Hz 连续控制可消除冠军的高增益失稳")
     return parser.parse_args()
 
 
