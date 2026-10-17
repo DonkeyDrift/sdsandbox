@@ -72,3 +72,14 @@ dataset
 # 本地构建产物
 build/
 dist/
+
+# RL 产物:文档(journal/报告)入库,二进制模型/日志留本地
+outputs/*.zip
+outputs/rl_halloffame/
+outputs/rl_ckpt_*/
+outputs/rl_best_*/
+outputs/rl_tb*/
+outputs/rl_ppo_ckpt/
+outputs/rl_best/
+outputs/*.log
+outputs/unitylog_*.txt
