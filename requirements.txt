@@ -3,4 +3,7 @@ pillow
 tk
 h5py
 gym
+gymnasium
+stable-baselines3
+tensorboard
 -e git+https://github.com/tawnkramer/gym-donkeycar.git#egg=gym_donkeycar

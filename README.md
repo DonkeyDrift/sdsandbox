@@ -137,6 +137,22 @@ python predict_client.py --model=../outputs/mymodel.h5
 
 
 
+## Reinforcement learning
+
+The simulator speaks a gym-style RL protocol (synchronous stepping, seeded random spawn on the track center-line, collision/flip/stuck termination signals, no-image state mode, `--rl` server flag). See `AGENTS.md` "RL 训练协议" for the message reference and `src/rl_smoke_test.py` for a runnable protocol check.
+
+Train with PPO (requires [gym-donkeycar](https://github.com/tawnkramer/gym-donkeycar) and stable-baselines3):
+
+```bash
+pip install -r requirements.txt          # gymnasium / stable-baselines3 / tensorboard
+pip install -e ../GymDonkeyCar           # 或你的 gym-donkeycar 路径
+python3 src/rl_train.py --envs 4 --steps 100000
+```
+
+Each worker launches its own headless sim instance on port 9101+rank (state-vector observations, ~120-250 steps/s aggregate). Use `--vision` for image observations with a CNN policy (sims run windowed). Models land in `outputs/`, tensorboard in `outputs/rl_tb/`.
+
+
+
 ## Requirements
 * [python 3.5+ 64 bit](https://www.python.org/)*
 * [tensorflow-1.10+](https://github.com/tensorflow/tensorflow)
