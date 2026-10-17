@@ -53,3 +53,7 @@
 - 视觉训练:`--vision --async-mode --eval-freq 20000`(同步模式的 AsyncGPUReadback 在离屏/遮挡下挂起;
   异步评测 3×2000 步一次约 7 分钟,频率必须调低);resume 路径不带 .zip 后缀(SB3 会自动补)。
 - 多训练并行必须 `--run-name` 隔离(best/ckpt 目录),端口分段 9101+ / 9201+。
+- 相机跟随在同步模式冻结的坑:`CameraFollow` 原为 FixedUpdate + deltaTime 缩放——timeScale=0 时
+  FixedUpdate 不跑且 deltaTime 恒 0,相机永久停在出生位。已改 Update + unscaledDeltaTime。
+- batchmode 构建报 `No ULF license found / Token not found in cache`:Unity Hub 没在运行,
+  `open -a "Unity Hub"` 等 ~20s 刷新令牌后重试即可。
