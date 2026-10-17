@@ -39,3 +39,17 @@
 - TCP 业务 handler：`sdsim/Assets/Scripts/tcp/TcpCarHandler.cs`——消息注册/遥测组包（快路径零分配 TxAscii + 回退 JSONObject 双实现，加字段要同步两处）；`NumField()` 助手兼容字符串/数字两种 JSON 取值（NUMBER 型 `.str` 为 null，直接 `.str` 会炸）；同步步进状态机（pendingSteps/SyncStep/SyncPostReset）在 Update 的 `!asynchronous` 分支。
 - 发送层：`sdsim/Assets/Scripts/tcp/TcpClient.cs`——池化发送队列是唯一出口（CommitPooledSend/SendData 都进队）；`PooledSendCallback` 对 `EndSend` 部分发送补发剩余字节。
 - 构建：`sdsim/Assets/Editor/BuildCommand.cs` 支持 `-buildTarget <StandaloneOSX|StandaloneLinux64|StandaloneWindows64>`（本机缺 Linux 模块时需先在 Hub 装 "Linux Build Support"）。
+
+## RL 训练实操沉淀(2026-10-18 闭环实战)
+
+- 命令:`python3 src/rl_train.py --resume <模型> --run-name <名> --envs 4 --steps <目标计数>`(续训计数累计);
+  评测:`python3 src/rl_eval.py --model <m> --seed-base 5000 --episodes 10 --max-steps 2500 --json --launch-sim --port 9301 --sync --time-step 0.05`。
+- **验收用同步模式**:异步 20Hz 评测会惩罚高增益策略(救车动作失稳),同步 0.05s 才是训练执行语义。
+- **PhysX 多线程非确定**:同模型同种子局级结果有位级方差,验收按多次/长局口径判定。
+- 铁律:训练运行期间清理 sim 只按端口 `lsof -ti:<ports> | xargs kill`,**严禁 `pkill -f donkey_sim`**(两次误杀训练);
+  补丁后必须单环境实跑验证(py_compile 不够);`time/fps >600` 或 ep_rew 冻结=假步进,立即查 sim 存活。
+- PPO 续训已收敛模型默认 lr 即可;真正的杠杆是**出生课程**(lateral 1.8±种子随机/heading 12,
+  救车能力)与堆里程;评测上限 2000 会被饱和型策略打满,需结合 held-out 种子测。
+- 视觉训练:`--vision --async-mode --eval-freq 20000`(同步模式的 AsyncGPUReadback 在离屏/遮挡下挂起;
+  异步评测 3×2000 步一次约 7 分钟,频率必须调低);resume 路径不带 .zip 后缀(SB3 会自动补)。
+- 多训练并行必须 `--run-name` 隔离(best/ckpt 目录),端口分段 9101+ / 9201+。
