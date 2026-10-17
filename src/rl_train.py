@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""RL 训练入口:PPO + sdsandbox DonkeySim 新协议(同步步进/状态量观测/随机出生)。
+"""RL 训练入口:PPO/SAC + sdsandbox DonkeySim 新协议(同步步进/状态量观测/随机出生)。
 
 每个 worker 起一个独立 sim 实例(--rl 模式),端口 port_base+rank:
-  python3 src/rl_train.py                    # 默认:2 env、同步步进、状态量观测
-  python3 src/rl_train.py --vision --envs 1  # 图像观测(CNN),sim 需出窗口渲染
+  python3 src/rl_train.py                       # 默认:PPO、2 env、同步步进、状态量观测
+  python3 src/rl_train.py --envs 4 --steps 500000
+  python3 src/rl_train.py --resume outputs/rl_ppo.zip --steps 500000   # 断点续训(曲线还在涨就接着训)
+  python3 src/rl_train.py --algo sac --envs 1 --steps 100000           # 平台期后换样本效率更高的 SAC
+  python3 src/rl_train.py --vision --envs 1     # 图像观测(CNN),sim 需出窗口渲染
 """
 
 import argparse
 
 import gymnasium as gym
-import gym_donkeycar  # noqa: F401 注册 donkey-* env(子进程 import 本模块时也需要)
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
+import gym_donkeycar  # noqa: F401 注册 donkey-* env
+from stable_baselines3 import PPO, SAC
+from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback, EvalCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 
 SPAWN_DEFAULT = {
@@ -23,9 +26,13 @@ SPAWN_DEFAULT = {
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="PPO RL training against sdsandbox DonkeySim")
-    parser.add_argument("--envs", type=int, default=2, help="并行 sim/worker 数")
-    parser.add_argument("--steps", type=int, default=20000, help="训练总步数")
+    parser = argparse.ArgumentParser(description="RL training against sdsandbox DonkeySim")
+    parser.add_argument("--algo", choices=["ppo", "sac"], default="ppo", help="PPO(默认,适合多env) / SAC(平台期精修,样本效率高)")
+    parser.add_argument("--resume", default=None, help="从已有模型继续训练(如 outputs/rl_ppo.zip)")
+    parser.add_argument("--envs", type=int, default=2, help="并行训练 sim/worker 数")
+    parser.add_argument("--eval-envs", type=int, default=1, help="评测专用 sim 数(0=关闭自动评测/最佳模型保存)")
+    parser.add_argument("--eval-freq", type=int, default=2500, help="评测间隔(回调次数,4 env 时约每 1 万环境步)")
+    parser.add_argument("--steps", type=int, default=20000, help="本次训练总步数(续训时累计)")
     parser.add_argument("--port-base", type=int, default=9101, help="首个 sim 端口,worker i 用 port_base+i")
     parser.add_argument("--sim-path", default="build/donkey_sim.app/Contents/MacOS/donkey_sim", help="sim 可执行文件路径")
     parser.add_argument("--sync", dest="sync_mode", action="store_true", default=True, help="同步步进(默认)")
@@ -38,12 +45,12 @@ def parse_args():
     parser.add_argument("--no-spawn", dest="spawn", action="store_false", help="复位回出生点")
     parser.add_argument("--max-cte", type=float, default=2.5, help="出界 cross-track 误差阈值")
     parser.add_argument("--seed", type=int, default=1, help="训练/出生随机种子")
-    parser.add_argument("--save", default="outputs/rl_ppo", help="最终模型保存路径")
+    parser.add_argument("--save", default=None, help="最终模型保存路径(默认 outputs/rl_<algo>.zip)")
     parser.add_argument("--tb", default="outputs/rl_tb", help="tensorboard 日志目录")
     return parser.parse_args()
 
 
-def make_env(rank: int, args, spawn_cfg, headless, img_enc):
+def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
     port = args.port_base + rank
 
     def _init():
@@ -64,7 +71,12 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc):
         }
         if not args.state_obs:
             conf["cam_resolution"] = (120, 160, 3)
-        return gym.make("donkey-mountain-track-v0", conf=conf)
+        env = gym.make("donkey-mountain-track-v0", conf=conf)
+        if time_limit:
+            # 本环境不自带步数上限(只 terminated 不 truncated);EvalCallback 的
+            # evaluate_policy 没有步数预算,好策略永不撞墙会把评测永远挂住。
+            env = gym.wrappers.TimeLimit(env, max_episode_steps=time_limit)
+        return env
 
     return _init
 
@@ -72,38 +84,56 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc):
 def main():
     args = parse_args()
     spawn_cfg = dict(SPAWN_DEFAULT) if args.spawn else None
+    save_path = args.save or ("outputs/rl_%s.zip" % args.algo)
 
     # vision 模式必须出窗口:sim 的 headless 是 -batchmode -nographics,无图形设备相机渲染不出图
     headless = args.state_obs
     img_enc = "JPG" if not args.state_obs else args.img_enc
 
-    print("[rl_train] %d 个 worker,sim 端口分配:" % args.envs)
-    for rank in range(args.envs):
-        print("  env[%d] -> 127.0.0.1:%d" % (rank, args.port_base + rank))
-    print("[rl_train] sync_mode=%s state_obs=%s img_enc=%s spawn=%s seed=%d"
-          % (args.sync_mode, args.state_obs, img_enc, spawn_cfg, args.seed))
+    print("[rl_train] %d 个训练 worker + %d 个评测 worker,sim 端口分配:" % (args.envs, args.eval_envs))
+    for rank in range(args.envs + args.eval_envs):
+        print("  port %d -> %s" % (args.port_base + rank, "train[%d]" % rank if rank < args.envs else "eval"))
+    print("[rl_train] algo=%s sync_mode=%s state_obs=%s img_enc=%s spawn=%s resume=%s seed=%d"
+          % (args.algo, args.sync_mode, args.state_obs, img_enc, spawn_cfg, args.resume, args.seed))
 
     envs = SubprocVecEnv([make_env(rank, args, spawn_cfg, headless, img_enc) for rank in range(args.envs)])
     envs = VecMonitor(envs)
 
     policy = "MlpPolicy" if args.state_obs else "CnnPolicy"
-    model = PPO(
-        policy,
-        envs,
-        n_steps=512,
-        batch_size=128,
-        gamma=0.99,
-        gae_lambda=0.95,
-        ent_coef=0.01,
-        seed=args.seed,
-        tensorboard_log=args.tb,
-        verbose=1,
-    )
+    if args.resume:
+        ctor = PPO if args.algo == "ppo" else SAC
+        model = ctor.load(args.resume, env=envs, tensorboard_log=args.tb, verbose=1)
+        print("[rl_train] resumed from %s" % args.resume)
+    elif args.algo == "ppo":
+        model = PPO(
+            policy, envs,
+            n_steps=512, batch_size=128, gamma=0.99, gae_lambda=0.95,
+            ent_coef=0.01, seed=args.seed, tensorboard_log=args.tb, verbose=1,
+        )
+    else:
+        model = SAC(
+            policy, envs,
+            buffer_size=50000, learning_starts=1000, batch_size=256,
+            gamma=0.99, train_freq=1, gradient_steps=1,
+            seed=args.seed, tensorboard_log=args.tb, verbose=1,
+        )
 
-    ckpt = CheckpointCallback(save_freq=5000, save_path="outputs/rl_ppo_ckpt/", name_prefix="ppo")
-    model.learn(args.steps, callback=ckpt)
-    model.save(args.save)
-    print("[rl_train] done, model saved to %s" % args.save)
+    callbacks = [CheckpointCallback(save_freq=5000, save_path="outputs/rl_%s_ckpt/" % args.algo,
+                                    name_prefix=args.algo)]
+    if args.eval_envs > 0:
+        # 评测环境限时 600 步(30s 仿真):足以区分策略优劣,且 evaluate_policy 不会失控
+        eval_env = SubprocVecEnv([make_env(args.envs, args, spawn_cfg, headless, img_enc, time_limit=600)
+                                  for _ in range(args.eval_envs)])
+        eval_env = VecMonitor(eval_env)
+        callbacks.append(EvalCallback(
+            eval_env, best_model_save_path="outputs/rl_best/", log_path="outputs/rl_best/",
+            eval_freq=args.eval_freq, n_eval_episodes=3, deterministic=True,
+        ))
+        print("[rl_train] 自动评测开启:每 %d 次回调评 3 局,最佳模型存 outputs/rl_best/" % args.eval_freq)
+
+    model.learn(args.steps, callback=CallbackList(callbacks), reset_num_timesteps=not bool(args.resume))
+    model.save(save_path)
+    print("[rl_train] done, model saved to %s" % save_path)
 
     envs.close()
 
