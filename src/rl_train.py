@@ -10,6 +10,7 @@
 """
 
 import argparse
+import os
 
 import gymnasium as gym
 import gym_donkeycar  # noqa: F401 注册 donkey-* env
@@ -29,6 +30,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="RL training against sdsandbox DonkeySim")
     parser.add_argument("--algo", choices=["ppo", "sac"], default="ppo", help="PPO(默认,适合多env) / SAC(平台期精修,样本效率高)")
     parser.add_argument("--resume", default=None, help="从已有模型继续训练(如 outputs/rl_ppo.zip)")
+    parser.add_argument("--lr", type=float, default=None,
+                        help="覆盖学习率(续训已收敛模型建议 1e-4,默认按算法内置)")
+    parser.add_argument("--ent-coef", type=float, default=None,
+                        help="覆盖 PPO 熵系数(默认 0.01;策略退化时可降到 0.003)")
     parser.add_argument("--envs", type=int, default=2, help="并行训练 sim/worker 数")
     parser.add_argument("--eval-envs", type=int, default=1, help="评测专用 sim 数(0=关闭自动评测/最佳模型保存)")
     parser.add_argument("--eval-freq", type=int, default=2500, help="评测间隔(回调次数,4 env 时约每 1 万环境步)")
@@ -85,6 +90,11 @@ def main():
     args = parse_args()
     spawn_cfg = dict(SPAWN_DEFAULT) if args.spawn else None
     save_path = args.save or ("outputs/rl_%s.zip" % args.algo)
+    if args.resume and os.path.abspath(save_path) == os.path.abspath(args.resume):
+        # 续训时默认保存路径与来源相同会把结果写回源文件;一旦中途/末尾保存,
+        # 源模型的步数计数与权重被污染,后续续训全部错位(2026-10-18 踩过)。
+        save_path = "outputs/rl_%s_resumeout.zip" % args.algo
+        print("[rl_train] 警告: --save 与 --resume 同源,自动改为 %s" % save_path)
 
     # vision 模式必须出窗口:sim 的 headless 是 -batchmode -nographics,无图形设备相机渲染不出图
     headless = args.state_obs
@@ -103,26 +113,32 @@ def main():
     if args.resume:
         ctor = PPO if args.algo == "ppo" else SAC
         model = ctor.load(args.resume, env=envs, tensorboard_log=args.tb, verbose=1)
-        print("[rl_train] resumed from %s" % args.resume)
+        if args.lr is not None:
+            model.learning_rate = args.lr  # 覆盖已存学习率(续训已收敛模型必配)
+        print("[rl_train] resumed from %s lr=%s" % (args.resume, args.lr))
     elif args.algo == "ppo":
         model = PPO(
             policy, envs,
             n_steps=512, batch_size=128, gamma=0.99, gae_lambda=0.95,
-            ent_coef=0.01, seed=args.seed, tensorboard_log=args.tb, verbose=1,
+            ent_coef=args.ent_coef if args.ent_coef is not None else 0.01,
+            learning_rate=args.lr if args.lr is not None else 3e-4,
+            seed=args.seed, tensorboard_log=args.tb, verbose=1,
         )
     else:
         model = SAC(
             policy, envs,
             buffer_size=50000, learning_starts=1000, batch_size=256,
             gamma=0.99, train_freq=1, gradient_steps=1,
+            learning_rate=args.lr if args.lr is not None else 3e-4,
             seed=args.seed, tensorboard_log=args.tb, verbose=1,
         )
 
     callbacks = [CheckpointCallback(save_freq=5000, save_path="outputs/rl_%s_ckpt/" % args.algo,
                                     name_prefix=args.algo)]
     if args.eval_envs > 0:
-        # 评测环境限时 600 步(30s 仿真):足以区分策略优劣,且 evaluate_policy 不会失控
-        eval_env = SubprocVecEnv([make_env(args.envs, args, spawn_cfg, headless, img_enc, time_limit=600)
+        # 评测环境限时 2000 步(100s 仿真):600 步上限会被饱和型策略打满无法区分,
+        # 且 evaluate_policy 无步数预算必须有上限兜底
+        eval_env = SubprocVecEnv([make_env(args.envs, args, spawn_cfg, headless, img_enc, time_limit=2000)
                                   for _ in range(args.eval_envs)])
         eval_env = VecMonitor(eval_env)
         callbacks.append(EvalCallback(
