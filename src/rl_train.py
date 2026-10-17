@@ -38,6 +38,8 @@ def parse_args():
     parser.add_argument("--envs", type=int, default=2, help="并行训练 sim/worker 数")
     parser.add_argument("--eval-envs", type=int, default=1, help="评测专用 sim 数(0=关闭自动评测/最佳模型保存)")
     parser.add_argument("--eval-freq", type=int, default=2500, help="评测间隔(回调次数,4 env 时约每 1 万环境步)")
+    parser.add_argument("--train-time-limit", type=int, default=2500,
+                        help="训练 episode 步数上限(默认 2500):强策略永不撞墙时强制回合循环,刷新随机出生")
     parser.add_argument("--steps", type=int, default=20000, help="本次训练总步数(续训时累计)")
     parser.add_argument("--port-base", type=int, default=9101, help="首个 sim 端口,worker i 用 port_base+i")
     parser.add_argument("--sim-path", default="build/donkey_sim.app/Contents/MacOS/donkey_sim", help="sim 可执行文件路径")
@@ -71,6 +73,7 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
             "sync_time_step": args.time_step,
             "state_obs": args.state_obs,
             "spawn_cfg": spawn_cfg,
+            "raise_on_stale": True,
             "start_delay": 6.0,
             "sim_args": ["--rl"],
             "cam_config": {"img_enc": img_enc},
@@ -107,7 +110,8 @@ def main():
     print("[rl_train] algo=%s sync_mode=%s state_obs=%s img_enc=%s spawn=%s resume=%s seed=%d"
           % (args.algo, args.sync_mode, args.state_obs, img_enc, spawn_cfg, args.resume, args.seed))
 
-    envs = SubprocVecEnv([make_env(rank, args, spawn_cfg, headless, img_enc) for rank in range(args.envs)])
+    envs = SubprocVecEnv([make_env(rank, args, spawn_cfg, headless, img_enc,
+                                   time_limit=args.train_time_limit) for rank in range(args.envs)])
     envs = VecMonitor(envs)
 
     policy = "MlpPolicy" if args.state_obs else "CnnPolicy"
