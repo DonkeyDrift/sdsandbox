@@ -40,7 +40,10 @@ def parse_args():
                         help="随机出生(默认,与训练一致)")
     parser.add_argument("--no-spawn", dest="spawn", action="store_false", help="固定出生点")
     parser.add_argument("--max-cte", type=float, default=2.5)
-    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--seed", type=int, default=7, help="单 episode 种子(与 --seed-base 二选一)")
+    parser.add_argument("--seed-base", type=int, default=None,
+                        help="held-out 种子基数:第 i 局用 seed_base+i(训练未覆盖的种子域)")
+    parser.add_argument("--json", action="store_true", help="末行输出机器可读 JSON 汇总")
     return parser.parse_args()
 
 
@@ -70,7 +73,8 @@ def main():
 
     results = []
     for ep in range(args.episodes):
-        obs, _ = env.reset(seed=args.seed + ep)
+        ep_seed = (args.seed_base + ep) if args.seed_base is not None else (args.seed + ep)
+        obs, _ = env.reset(seed=ep_seed)
         total, steps, reason = 0.0, 0, "max_steps"
         while steps < args.max_steps:
             action, _ = model.predict(obs, deterministic=True)
@@ -78,21 +82,33 @@ def main():
             total += reward
             steps += 1
             if terminated:
-                reason = "terminated(cte=%.2f hit=%s flipped=%s stuck=%.1f lap=%d)" % (
+                reason = "terminated(cte=%.2f hit=%s flipped=%s stuck=%.1f lap=%d pos=%s)" % (
                     info.get("cte", 0), info.get("hit"), info.get("flipped"),
-                    info.get("stuck_time", 0), info.get("lap", 0))
+                    info.get("stuck_time", 0), info.get("lap", 0), info.get("pos"))
                 break
             if truncated:
                 reason = "truncated"
                 break
-        results.append((total, steps, reason))
-        print("[rl_eval] ep%d: reward=%.1f steps=%d -> %s" % (ep, total, steps, reason))
+        results.append((total, steps, reason, info.get("lap", 0)))
+        print("[rl_eval] ep%d (seed=%d): reward=%.1f steps=%d -> %s" % (ep, ep_seed, total, steps, reason))
 
     env.close()
     avg_r = sum(r[0] for r in results) / len(results)
     avg_l = sum(r[1] for r in results) / len(results)
+    crashed = sum(1 for r in results if r[2].startswith("terminated"))
+    laps = sum(r[3] for r in results)
     print("[rl_eval] 平均 reward=%.1f 平均步数=%.0f (1 步=%.2fs 仿真)" %
           (avg_r, avg_l, args.time_step if args.sync_mode else 0.05))
+    if args.json:
+        import json as _json
+        print("RL_EVAL_JSON " + _json.dumps({
+            "episodes": len(results), "avg_reward": round(avg_r, 1),
+            "avg_steps": round(avg_l, 1), "crash_episodes": crashed,
+            "crash_rate": round(crashed / len(results), 3), "laps": laps,
+            "max_steps": args.max_steps,
+            "seeds": (list(range(args.seed_base, args.seed_base + args.episodes))
+                      if args.seed_base is not None else None),
+        }))
 
 
 if __name__ == "__main__":
