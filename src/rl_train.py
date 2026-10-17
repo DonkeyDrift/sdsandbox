@@ -29,6 +29,7 @@ SPAWN_DEFAULT = {
 def parse_args():
     parser = argparse.ArgumentParser(description="RL training against sdsandbox DonkeySim")
     parser.add_argument("--algo", choices=["ppo", "sac"], default="ppo", help="PPO(默认,适合多env) / SAC(平台期精修,样本效率高)")
+    parser.add_argument("--run-name", default="run", help="运行实例名:best/ckpt 目录按名隔离(并行多训练必须不同名)")
     parser.add_argument("--resume", default=None, help="从已有模型继续训练(如 outputs/rl_ppo.zip)")
     parser.add_argument("--lr", type=float, default=None,
                         help="覆盖学习率(续训已收敛模型建议 1e-4,默认按算法内置)")
@@ -133,7 +134,7 @@ def main():
             seed=args.seed, tensorboard_log=args.tb, verbose=1,
         )
 
-    callbacks = [CheckpointCallback(save_freq=5000, save_path="outputs/rl_%s_ckpt/" % args.algo,
+    callbacks = [CheckpointCallback(save_freq=5000, save_path="outputs/rl_ckpt_%s/" % args.run_name,
                                     name_prefix=args.algo)]
     if args.eval_envs > 0:
         # 评测环境限时 2000 步(100s 仿真):600 步上限会被饱和型策略打满无法区分,
@@ -142,10 +143,11 @@ def main():
                                   for _ in range(args.eval_envs)])
         eval_env = VecMonitor(eval_env)
         callbacks.append(EvalCallback(
-            eval_env, best_model_save_path="outputs/rl_best/", log_path="outputs/rl_best/",
+            eval_env, best_model_save_path="outputs/rl_best_%s/" % args.run_name,
+            log_path="outputs/rl_best_%s/" % args.run_name,
             eval_freq=args.eval_freq, n_eval_episodes=3, deterministic=True,
         ))
-        print("[rl_train] 自动评测开启:每 %d 次回调评 3 局,最佳模型存 outputs/rl_best/" % args.eval_freq)
+        print("[rl_train] 自动评测开启:每 %d 次回调评 3 局,最佳模型存 outputs/rl_best_%s/" % (args.eval_freq, args.run_name))
 
     model.learn(args.steps, callback=CallbackList(callbacks), reset_num_timesteps=not bool(args.resume))
     model.save(save_path)
