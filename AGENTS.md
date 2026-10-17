@@ -35,7 +35,7 @@
 - 车控：`sdsim/Assets/Scripts/Car.cs`——Rigidbody + 4 WheelCollider；`Set(pos, rot)` + `KeepSetting` 协程是异步模式物理瞬移的入口；**同步模式用 `SetImmediate`**；`ApplyRequests()`/`SyncKinematics()` 供 FixedUpdate 与手动步进共用；暴露 `IsFlipped`/`StuckTime`/`LastCollisionImpulse` 供遥测上报。
 - 赛道中央线：`PathManager`（各场景实例用序列化覆盖选路径来源，如 mountain_track 用 `doLoadPointPath` + `Resources/Track/large_loop_center.txt`）+ `CarPath`（`GetClosestSpanIndex(pos)` 全扫；带 hint 重载做 ±64 窗口局部搜索，`PathNode.rotation` 即该点切线朝向，可用来「回位到赛道中央并摆正」）。
 - 防卡护栏 / 翻车自动恢复 / R 键回位：`sdsim/Assets/Scripts/CarRecovery.cs`——`RuntimeInitializeOnLoadMethod` 自举 + `DontDestroyOnLoad`，阈值均为 public 可调（`stuckTime` 2.5s、`flipGraceTime` 1.5s、`liftHeight` 0.4m 等）；RL 车（`TcpCarHandler.RlMode`）跳过自动恢复，由遥测字段上报状态。
-- 车辆生成：`CarSpawner.cs`（`cars` 列表；本地玩家车是 `cars[0]`；无 TCP 客户端时由 menu 的 Manual Drive/pace car 流程生成；`--rl` 时清理观众分屏相机）。
+- 车辆生成：`CarSpawner.cs`（`cars` 列表；本地玩家车是 `cars[0]`；无 TCP 客户端时由 menu 的 Manual Drive/pace car 流程生成；`--rl` 且批处理/无图形设备（训练实例）才清理观众分屏相机，带窗口的 `--rl` 保留跟车相机）。
 - TCP 业务 handler：`sdsim/Assets/Scripts/tcp/TcpCarHandler.cs`——消息注册/遥测组包（快路径零分配 TxAscii + 回退 JSONObject 双实现，加字段要同步两处）；`NumField()` 助手兼容字符串/数字两种 JSON 取值（NUMBER 型 `.str` 为 null，直接 `.str` 会炸）；同步步进状态机（pendingSteps/SyncStep/SyncPostReset）在 Update 的 `!asynchronous` 分支。
 - 发送层：`sdsim/Assets/Scripts/tcp/TcpClient.cs`——池化发送队列是唯一出口（CommitPooledSend/SendData 都进队）；`PooledSendCallback` 对 `EndSend` 部分发送补发剩余字节。
 - 构建：`sdsim/Assets/Editor/BuildCommand.cs` 支持 `-buildTarget <StandaloneOSX|StandaloneLinux64|StandaloneWindows64>`（本机缺 Linux 模块时需先在 Hub 装 "Linux Build Support"）。

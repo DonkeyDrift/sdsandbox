@@ -235,9 +235,12 @@ public class CarSpawner : MonoBehaviour
             return;
         }
 
-        // RL/headless(--rl):不生成观众分屏相机,GPU 全部留给各车 CameraSensor 遥测。
-        // 摄像头数不再与车数联动,单实例可挂任意多 TCP 客户端车。
-        if (GlobalState.rlMode)
+        // RL/headless:批处理或无图形设备的 --rl 实例(训练用,headless=-batchmode
+        // -nographics)不生成观众分屏相机,GPU 留给各车 CameraSensor 遥测,摄像头数
+        // 不与车数联动;带窗口的 --rl(人工观看/评测)走正常跟随相机路径。
+        bool rlNoSpectatorCams = GlobalState.rlMode
+            && (Application.isBatchMode || SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null);
+        if (rlNoSpectatorCams)
         {
             if (cameras.Count > 0)
             {
