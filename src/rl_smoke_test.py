@@ -307,6 +307,15 @@ def step_h_sync_mode(c):
     except TimeoutError:
         check("h1 async telemetry stops in sync mode", True, "silent for 1.0s")
 
+    # 先复位到赛道上:f/e 段自由驾驶后车可能贴在护栏上(轮空转、速度起不来),
+    # h3 的加速断言依赖一个无遮挡的起步姿态
+    c.send({"msg_type": "reset_car", "node_index": "10", "seed": "5"})
+    c.next_telemetry()
+    # 复位落定瞬间车仍在滑动(残余速度可能高于后续帧),先刹停建立干净基线
+    for _ in range(3):
+        send_control(c, throttle=0.0, brake=1.0)
+        c.next_telemetry()
+
     for _ in range(5):
         send_control(c, throttle=1.0)
     fids = []

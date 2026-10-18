@@ -280,3 +280,39 @@ done 时 -10。实现于临时 fork env 包装（不改仓库代码，journal �
   avg 444.3 步/3 局(约 20s 仿真);训练分布 ep_len 已达 185。
 - 47.5k 最新 ckpt held-out 仅 135 步——latest≠best,基线取 eval-best 快照。
 - 全部交付就绪:champion2(两组 held-out 满分)、三份报告、journal、脚本与规范。
+
+### 2026-10-18(观赛后半) 观赏质量攻坚与异步鲁棒微调
+- v8(同步0.01+硬挂载):3/3 满 3000 步零事故,但用户反馈弯道左右抖+前后抖更剧。
+  归因:硬挂载把物理步进抖动 1:1 传给画面;车体悬挂/侧倾动画按物理步跳变被
+  相机直接继承。同步模式世界只能按控制步推进,相机任何设置都只是搬移抖动——
+  根治必须让物理连续(异步),而冠军异步必撞(收敛策略对异步相位差敏感,20Hz/
+  60Hz/60Hz+保持3 四种配置全快速失稳)。
+- **异步鲁棒微调启动**(bash-cwoxcnee):champion2 → 4 异步 env(40Hz 控制,
+  lr 1e-4,救车课程同),让 PPO 在异步动力学下自我稳定。早期 crash 密集属
+  预期。fps 数值型坑:cam_config fps 必须传数值(fork 有 fps>0 比较,字符串
+  会杀接收线程)。
+- rl_eval 新增 --cam-fps/--action-repeat;同步模式插值开关随 step_mode 切换
+  (进同步 None / 出同步 Interpolate);CameraFollow 硬挂载(≥0.95 直接赋值)。
+
+## 2026-10-18 09:35 观赏体验终局:同步步进渲染帧摊匀(方案C)
+
+- 异步微调 v2 失败复盘:tb 目录污染误读(旧 run 与新 run 同写 PPO_3);真相是 v2 只跑了 4 个 iteration、fps=1-3 —— headless(-batchmode -nographics)下异步观测流停摆(疑依附相机渲染,nographics 不渲染),异步训练路线在当前架构下不可行;且 EvalCallback 在 10k 步处因评测 worker 的 sim 断连 EOFError 崩掉,CheckpointCallback(5000 vec-step 一档)未及触发,全部产物丢失。
+- 放弃异步训练,改修同步观赏的根:0.05s 控制步 = 5×Simulate(0.01) 挤在一个渲染帧 → 世界突发 50ms 再冻结,相机硬挂载后 1:1 传导成"窜动"。
+- 改动(TcpCarHandler.cs):窗口模式(非 batchmode)进同步时 syncSpread=true,控制步的 k 个固定子步按实时配速摊到连续渲染帧(spreadNextAllowed 10ms 槽位、单帧预算 3、控制步间不追赶),最后子步后才 SyncKinematics+采集回读发遥测。物理子步序列与突发版完全一致,观测内容不变;batchmode 训练路径不动。
+- 踩坑:SyncUpdate 的 pendingSteps>0 门在摊匀半途(pending 已减到 0)挡住续帧,第 5 个控制步永远卡死——门改为 pendingSteps>0 || spreadRemaining>0。
+- 副产物修复:rl_smoke_test h3  flaky 根因(f/e 段后车贴护栏轮空转;复位残余滑动污染基线)——h 段加 reset_car+刹停 3 帧。
+- 验证:smoke 24/24 三连过(窗口 sim,摊匀路径);逐子步调试日志确认 reqT/wcT/wcB 正确、复位后加速正常;调试日志已移除后重建。
+- 演示:rl_eval --sync champion2 3 局 seed-base 7000(全新 held-out)对着窗口 sim 跑,即用户正在看的画面。
+
+## 2026-10-18 10:10 相机两轮修复:LateUpdate 时序 + 朝向低通
+
+- 摊匀上线后用户仍见"车前后抖、景物不抖"——根因是帧内时序:CameraFollow.Update 与
+  TcpCarHandler.Update(本帧才 Simulate 动车)同阶段无序执行,相机读到的是步进前车位;
+  有子步帧车偏前 ~8cm、无子步帧归位,交替成高频抖动。修复:跟随挪到 LateUpdate
+  (所有 Update 之后取最终车位)。
+- 随后用户反馈"紧跟但左右晃":硬挂载把朝向也逐帧拷贝,策略高频转向修正 1:1 晃画面。
+  修复:位置保持零滞后,朝向改指数低通(rotSmoothTime=0.35s,帧率无关 Slerp);
+  发夹弯稳态滞后 ~10° 可接受。旧的 approachRotRate 字段废弃。
+- 验证:smoke 24/24;冠军同步评测(摊匀+新相机)held-out 种子 7000-7002 三局全满
+  3000 步、0 撞、14 圈,avg reward 5407.9(outputs/rl_eval_spread_demo.log)。
+  驾驶行为与冠军验收时一致,纯观赏层改动不影响物理。

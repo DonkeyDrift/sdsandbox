@@ -55,6 +55,8 @@ def parse_args():
     parser.add_argument("--spawn-heading", type=float, default=8.0, help="出生朝向噪声(度)")
     parser.add_argument("--spawn-node-min", type=int, default=5, help="出生节点范围下限(针对性课程用)")
     parser.add_argument("--spawn-node-max", type=int, default=245, help="出生节点范围上限")
+    parser.add_argument("--cam-fps", type=float, default=0.0,
+                        help="异步训练遥测/控制频率(Hz,0=默认20):异步鲁棒微调用 40")
     parser.add_argument("--max-cte", type=float, default=2.5, help="出界 cross-track 误差阈值")
     parser.add_argument("--seed", type=int, default=1, help="训练/出生随机种子")
     parser.add_argument("--save", default=None, help="最终模型保存路径(默认 outputs/rl_<algo>.zip)")
@@ -85,6 +87,8 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
         if not args.state_obs:
             conf["cam_resolution"] = (120, 160, 3)
             conf["headless_keep_gfx"] = True  # 视觉用 -batchmode 离屏渲染:无窗口、无遮挡休眠
+        if args.cam_fps > 0:
+            conf["cam_config"]["fps"] = args.cam_fps  # 数值型:fork 有 fps>0 数值比较
         env = gym.make("donkey-mountain-track-v0", conf=conf)
         if time_limit:
             # 本环境不自带步数上限(只 terminated 不 truncated);EvalCallback 的

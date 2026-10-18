@@ -68,6 +68,13 @@ namespace tk
         int pendingSteps = 0;
         bool syncCapturePending = false;
         int syncKickedFrame = 0;
+        // 窗口观赏:同步控制步的 k 个物理子步摊到连续渲染帧并按实时配速,
+        // 世界逐帧连续推进,消除"整步突发→冻结"的窜动;子步序列与突发模式
+        // 完全一致(同次数同时长的 Simulate),遥测内容不受影响。
+        // batchmode 无渲染循环,保持突发逻辑保住训练吞吐。
+        bool syncSpread = false;
+        int spreadRemaining = 0;
+        float spreadNextAllowed = 0f;
 
         public enum State
         {
@@ -762,6 +769,9 @@ namespace tk
                 Physics.autoSimulation = false;
                 pendingSteps = 0;
                 syncCapturePending = false;
+                syncSpread = !Application.isBatchMode;
+                spreadRemaining = 0;
+                spreadNextAllowed = Time.unscaledTime;
                 // 手动 Simulate + timeScale=0 下 Unity 插值时钟不推进,开着会让
                 // 车身相对真实姿态逐步振荡(实测恶化)——同步模式必须关。
                 if (carComp0 != null && carComp0.rb != null)
@@ -776,6 +786,8 @@ namespace tk
                 Time.timeScale = savedTimeScale;
                 pendingSteps = 0;
                 syncCapturePending = false;
+                syncSpread = false;
+                spreadRemaining = 0;
                 // 恢复常规渲染插值(异步连续物理下消除跳步感)
                 if (carComp0 != null && carComp0.rb != null)
                     carComp0.rb.interpolation = RigidbodyInterpolation.Interpolate;
@@ -1015,10 +1027,47 @@ namespace tk
                 return;
             }
 
-            if (pendingSteps > 0)
+            if (pendingSteps > 0 || (syncSpread && spreadRemaining > 0))
+            {
+                if (syncSpread)
+                    SyncStepSpread();
+                else
+                {
+                    System.Threading.Interlocked.Decrement(ref pendingSteps);
+                    SyncStep();
+                }
+            }
+        }
+
+        // 摊匀版同步步进(仅窗口模式):一个控制步的 k 个固定子步按实时配速
+        // 分到自己的渲染帧里,世界每帧最多推进 10ms,画面连续;最后子步完成
+        // 后才采集相机回读并发遥测,观测内容与突发版完全一致。
+        void SyncStepSpread()
+        {
+            if (spreadRemaining == 0)
             {
                 System.Threading.Interlocked.Decrement(ref pendingSteps);
-                SyncStep();
+                if (carComp0 != null)
+                    carComp0.ApplyRequests();
+                spreadRemaining = Mathf.Max(1, Mathf.RoundToInt(time_step / syncFixedDt));
+                // 等客户端期间时钟已走远:从当前时刻重新配速,不做补偿性追赶,
+                // 否则控制步之间会退化成突发。
+                spreadNextAllowed = Mathf.Max(spreadNextAllowed, Time.unscaledTime);
+            }
+
+            int budget = 3; // 单帧最多 3 子步:>=34fps 即可跟上 100Hz 仿真钟
+            while (spreadRemaining > 0 && budget-- > 0 && Time.unscaledTime >= spreadNextAllowed)
+            {
+                Physics.Simulate(syncFixedDt);
+                spreadNextAllowed += syncFixedDt;
+                spreadRemaining--;
+            }
+
+            if (spreadRemaining == 0)
+            {
+                if (carComp0 != null)
+                    carComp0.SyncKinematics(Mathf.Max(1, Mathf.RoundToInt(time_step / syncFixedDt)) * syncFixedDt);
+                KickSyncCapture();
             }
         }
 

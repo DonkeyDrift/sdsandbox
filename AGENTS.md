@@ -55,5 +55,14 @@
 - 多训练并行必须 `--run-name` 隔离(best/ckpt 目录),端口分段 9101+ / 9201+。
 - 相机跟随在同步模式冻结的坑:`CameraFollow` 原为 FixedUpdate + deltaTime 缩放——timeScale=0 时
   FixedUpdate 不跑且 deltaTime 恒 0,相机永久停在出生位。已改 Update + unscaledDeltaTime。
+- 观赏链路终版(2026-10-18 三轮攻坚):① 同步步进窗口模式摊匀——`TcpCarHandler.SyncStepSpread`
+  把控制步的 k 个 `Simulate(0.01)` 按实时配速摊到连续渲染帧(位置逐帧连续;物理序列与突发版
+  逐比特一致,batchmode 仍走突发保吞吐;SyncUpdate 的门必须是 `pendingSteps>0 || spreadRemaining>0`,
+  否则摊匀半途被挡、最后一个控制步永远卡死);② 相机必须 `LateUpdate`(Update 阶段才 Simulate,
+  Update 跟随会读到步进前车位,有/无子步帧交替成前后抖);③ 朝向必须低通(`rotSmoothTime` 0.35s),
+  硬拷贝朝向会把策略高频转向修正 1:1 晃到画面上。
+- **headless 异步训练不可行**(2026-10-18 v2 实测):-batchmode -nographics 下异步观测流 ~1fps
+  (疑依附相机渲染);异步路线只能有窗。tb 目录会被多次 run 复用(PPO_N 混写),分析前先按
+  event 文件时间戳归属,勿整目录聚合误读。
 - batchmode 构建报 `No ULF license found / Token not found in cache`:Unity Hub 没在运行,
   `open -a "Unity Hub"` 等 ~20s 刷新令牌后重试即可。
