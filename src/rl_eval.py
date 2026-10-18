@@ -22,6 +22,20 @@ SPAWN_DEFAULT = {
     "heading_noise": 8.0,
 }
 
+# 场景名 -> gym env id(与 EditorBuildSettings 的 10 个可玩场景对应,menu 除外)
+LEVEL_TO_ENV = {
+    "mountain_track": "donkey-mountain-track-v0",
+    "warehouse": "donkey-warehouse-v0",
+    "sparkfun_avc": "donkey-avc-sparkfun-v0",
+    "generated_track": "donkey-generated-track-v0",
+    "generated_road": "donkey-generated-roads-v0",
+    "roboracingleague_1": "donkey-roboracingleague-track-v0",
+    "waveshare": "donkey-waveshare-v0",
+    "mini_monaco": "donkey-minimonaco-track-v0",
+    "warren": "donkey-warren-track-v0",
+    "circuit_launch": "donkey-circuit-launch-track-v0",
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a trained PPO policy against DonkeySim")
@@ -48,6 +62,8 @@ def parse_args():
                         help="每个动作连续保持 N 个环境步:异步模式对齐训练的 0.05s 动作时长语义")
     parser.add_argument("--cam-fps", type=float, default=0.0,
                         help="异步评测遥测/控制频率(Hz,0=默认20):60Hz 连续控制可消除冠军的高增益失稳")
+    parser.add_argument("--level", default="mountain_track",
+                        help="场景名(Phase4 多场景零样本):%s" % ",".join(sorted(LEVEL_TO_ENV)))
     return parser.parse_args()
 
 
@@ -59,7 +75,7 @@ def main():
         "host": "127.0.0.1",
         "port": args.port,
         "headless": args.launch_sim,
-        "level": "mountain_track",
+        "level": args.level,
         "max_cte": args.max_cte,
         "sync_mode": args.sync_mode,
         "sync_time_step": args.time_step,
@@ -71,8 +87,12 @@ def main():
     if not args.state_obs:
         conf["cam_resolution"] = (120, 160, 3)
 
-    print("[rl_eval] 连接 127.0.0.1:%d sync=%s state_obs=%s" % (args.port, args.sync_mode, args.state_obs))
-    env = gym.make("donkey-mountain-track-v0", conf=conf)
+    env_id = LEVEL_TO_ENV.get(args.level)
+    if env_id is None:
+        raise SystemExit("未知场景 %r,可选: %s" % (args.level, sorted(LEVEL_TO_ENV)))
+    print("[rl_eval] 连接 127.0.0.1:%d sync=%s state_obs=%s level=%s" %
+          (args.port, args.sync_mode, args.state_obs, args.level))
+    env = gym.make(env_id, conf=conf)
     model = PPO.load(args.model)
 
     results = []
