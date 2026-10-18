@@ -517,3 +517,12 @@ lateral 1.8/heading 12 + lr 1e-4,run-name asyncrob,目标计数 2600000,
 (--envs 2 + 1 eval,端口 9201+,--eval-freq 20000 按上轮教训,run-name vision2,
 保存 outputs/rl_vision2.zip)。回读超时兜底(3a6352d)已在包内,挂起会 loud 回退
 而非冻死。验收门:held-out 10局 avg>=1500(基线 444)。
+
+### 2026-10-18 17:00 Phase 4 多场景正式验收:10/10 场景零样本全过
+
+champion2,held-out 种子 8300-8302 ×3局 ×1000步 同步,逐场景 headless 评测
+(outputs/rl_eval_zeroshot_formal.log):**10 场景 ×3局全部满 1000 步、零事故、
+合计 50 圈**。零样本泛化成立——状态量观测(cte/速度/进度为主)场景无关,
+**多场景混合训练判定为非必需**,Phase 4 该子项验收通过。
+ONNX 导出此前已验证(champion2.onnx 数值一致)。Phase 4 剩余:最终冠军导出
+(若 Phase 3 不换冠军则已完成)。
