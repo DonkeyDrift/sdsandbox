@@ -14,8 +14,8 @@ GymDonkeyCar/gym_donkeycar/envs/donkey_sim.py 的 observe()):
 真车侧必须按同样公式归一化后再喂 ONNX。
 
 输出 2 维:[steering, throttle]——steering ∈ [-1,1](左正),
-throttle ∈ [0,1]。ONNX 内部已含 SB3 的 action space 反缩放,
-直接输出物理量,无需再线性变换。
+throttle ∈ [0,1]。ONNX 内部已含 SB3 的 clip(GaussianPolicy 确定性动作 =
+网络 mean 后 clip 到 action_space),直接输出物理量,无需再线性变换。
 
 用法:python3 src/export_onnx.py --model <冠军.zip> --out outputs/rl_export/champion.onnx
 """
@@ -52,11 +52,12 @@ class ExportPolicy(torch.nn.Module):
         latent_pi, latent_vf = self.policy.mlp_extractor(feats)
         mean = self.policy.action_net(latent_pi)
         value = self.policy.value_net(latent_vf)
-        # MlpPolicy 高斯分布 mean_actions 即确定性动作;tanh 输出已由
-        # action_net 保证,反缩放用 SB3 的 low/high(见 unscale_action)。
+        # GaussianPolicy(squash_output=False)的确定性动作 = 网络 mean 后直接
+        # clip 到 action_space(SB3 BasePolicy.predict 的 unsquashed 分支),
+        # 不是仿射反缩放——反缩放只用于 squash_output 的 tanh 策略。
         low = torch.as_tensor(self.policy.action_space.low, dtype=torch.float32)
         high = torch.as_tensor(self.policy.action_space.high, dtype=torch.float32)
-        action = low + (0.5 * (mean + 1.0) * (high - low))
+        action = torch.clamp(mean, low, high)
         return action, value
 
 
