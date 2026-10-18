@@ -99,6 +99,21 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
     return _init
 
 
+def _close_vec_env(env):
+    """收尾关闭 VecEnv。中断时 worker 可能卡在同步步进的 sim 等待上,优雅 close 会
+    在 pipe.recv() 死等(gymnasium 对 idle worker 的 close 无超时);先给 10s 优雅窗口,
+    不行就强制 terminate。terminate 路径 worker 的 sim 子进程会成为孤儿,
+    按端口清理(运维铁律)。"""
+    if env is None:
+        return
+    for kwargs in ({"timeout": 10}, {"terminate": True}):
+        try:
+            env.close(**kwargs)
+            return
+        except Exception:
+            continue
+
+
 def main():
     args = parse_args()
     spawn_cfg = {"node_min": args.spawn_node_min, "node_max": args.spawn_node_max,
@@ -148,7 +163,9 @@ def main():
             seed=args.seed, tensorboard_log=args.tb, verbose=1,
         )
 
-    callbacks = [CheckpointCallback(save_freq=5000, save_path="outputs/rl_ckpt_%s/" % args.run_name,
+    # save_freq 是 vec-step 粒度(=步数/envs):换算成每 ~25k 环境步一档,长跑墙钟可预期
+    ckpt_freq = max(1, 25000 // args.envs)
+    callbacks = [CheckpointCallback(save_freq=ckpt_freq, save_path="outputs/rl_ckpt_%s/" % args.run_name,
                                     name_prefix=args.algo)]
     if args.eval_envs > 0:
         # 评测环境限时 2000 步(100s 仿真):600 步上限会被饱和型策略打满无法区分,
@@ -163,11 +180,25 @@ def main():
         ))
         print("[rl_train] 自动评测开启:每 %d 次回调评 3 局,最佳模型存 outputs/rl_best_%s/" % (args.eval_freq, args.run_name))
 
-    model.learn(args.steps, callback=CallbackList(callbacks), reset_num_timesteps=not bool(args.resume))
-    model.save(save_path)
-    print("[rl_train] done, model saved to %s" % save_path)
-
-    envs.close()
+    try:
+        model.learn(args.steps, callback=CallbackList(callbacks), reset_num_timesteps=not bool(args.resume),
+                    tb_log_name=args.run_name)
+        model.save(save_path)
+        print("[rl_train] done, model saved to %s" % save_path)
+    except BaseException as exc:
+        # 异常/中断(含 KeyboardInterrupt、EvalCallback EOFError)也落盘保命存档,
+        # 否则崩溃发生在第一个存档点之前 = 全部白跑(2026-10-18 踩过)
+        crash_path = save_path + ".crash"
+        try:
+            model.save(crash_path)
+            print("[rl_train] 异常 %r:已保存保命存档 %s" % (exc, crash_path))
+        except Exception:
+            print("[rl_train] 异常 %r:保命存档也失败" % (exc,))
+        raise
+    finally:
+        _close_vec_env(envs)
+        if args.eval_envs > 0:
+            _close_vec_env(eval_env)
 
 
 if __name__ == "__main__":

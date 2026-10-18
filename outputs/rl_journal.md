@@ -359,3 +359,31 @@ done 时 -10。实现于临时 fork env 包装（不改仓库代码，journal �
   "摊匀未完成"状态,否则最后一个控制步永远卡死——多帧状态机不能复用单帧门。
 - **stringly 配置陷阱**:cam_config.fps 传字符串会在 fork 子进程里杀死接收线程(数值比较),
   协议字段类型必须在边界处规范化。
+
+## 2026-10-18 13:30 下一阶段启动:Phase 0 训练基建加固(完成,验收通过)
+
+按 `outputs/rl_handoff_prompt.md` 推进。Phase 0 改动(`src/rl_train.py`):
+
+1. **保命存档**:`model.learn()` 包 try/except BaseException——异常/中断(含 KeyboardInterrupt、
+   EvalCallback EOFError)先 `model.save(save_path + ".crash")` 再 re-raise。实测 SIGINT 中断
+   后存档可加载(num_timesteps=15900,`outputs/rl_run_phase0kill2.log` 有 KeyboardInterrupt 迹)。
+2. **墙钟可预期 ckpt 档位**:CheckpointCallback `save_freq = max(1, 25000//envs)`(单位是
+   vec-step=回调次数;4 env 时 6250 次回调=25k 环境步一档)。验证:25k 步短训落盘
+   `rl_ckpt_phase0test/ppo_25000_steps.zip`。
+3. **tb 目录按 run-name 隔离**:`learn(tb_log_name=args.run_name)`。验证:短训写入
+   `outputs/rl_tb/phase0test_1/`,与历史 PPO_1..3 并列不混。SB3 2.7 实测结论:resume 时
+   `load()` 会从存档 data 恢复 `tensorboard_log`/`_custom_logger=False`,故 `tb_log_name`
+   对续训同样生效(continue-training 语义:同名 run-name 续写同目录,新名开新目录)。
+4. **收尾死锁修复(复验时发现)**:首个版本 finally 里裸 `envs.close()`——gymnasium 1.1.1
+   AsyncVectorEnv 对 idle worker 的优雅 close 是 `pipe.send("close")+pipe.recv()` 死等,
+   中断恰好落在同步步进 step_wait 时,worker 卡在 sim 等待、永远读不到 close → 主进程挂死
+   (实测挂 4 分钟,5 worker+5 sim 全留)。修复 `_close_vec_env()`:先 `close(timeout=10)`
+   (state!=DEFAULT 时 step_wait 超时转 terminate),再 `close(terminate=True)` 兜底。
+   复验:SIGINT 后 traceback 落盘、进程 0 残留;terminate 路径 worker 的 sim 成孤儿
+   (5 个),按端口清理即可(铁律 1 已有)。
+
+验证汇总:正常收尾路径(ckpt+tb+最终 save)✅ / 中断路径(crash 存档+干净退出)✅ /
+`rl_smoke_test.py` 24/24 ✅。证据日志:`outputs/rl_run_phase0test.log`(正常)、
+`outputs/rl_run_phase0kill.log`(首次死锁)、`outputs/rl_run_phase0kill2.log`(修复后)。
+
+下一步:Phase 1 鲁棒性续训(champion2 + lateral 2.2/heading 15/lr 1e-4,run-name robust2)。

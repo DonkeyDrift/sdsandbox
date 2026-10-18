@@ -64,5 +64,10 @@
 - **headless 异步训练不可行**(2026-10-18 v2 实测):-batchmode -nographics 下异步观测流 ~1fps
   (疑依附相机渲染);异步路线只能有窗。tb 目录会被多次 run 复用(PPO_N 混写),分析前先按
   event 文件时间戳归属,勿整目录聚合误读。
+- **rl_train 基建(2026-10-18 Phase 0 加固)**:learn() 已包 try/except——任何异常/中断自动
+  存 `<save>.crash` 保命存档;CheckpointCallback 档位 `25000//envs`(vec-step 粒度);
+  `tb_log_name=--run-name` 隔离 tb 目录。收尾关闭必须用 `close(timeout=10)` 再
+  `close(terminate=True)` 兜底——裸 `envs.close()` 在中断落在同步 step_wait 时死锁
+  (gymnasium 对 idle worker 的优雅 close 无超时);terminate 后 worker 的 sim 成孤儿,按端口清理。
 - batchmode 构建报 `No ULF license found / Token not found in cache`:Unity Hub 没在运行,
   `open -a "Unity Hub"` 等 ~20s 刷新令牌后重试即可。
