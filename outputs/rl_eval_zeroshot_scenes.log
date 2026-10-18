@@ -1,0 +1,9 @@
+generated_track RL_EVAL_JSON {"episodes": 1, "avg_reward": 889.5, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}
+mini_monaco RL_EVAL_JSON {"episodes": 1, "avg_reward": 875.0, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}
+warren RL_EVAL_JSON {"episodes": 1, "avg_reward": 892.5, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}
+circuit_launch RL_EVAL_JSON {"episodes": 1, "avg_reward": 887.9, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}
+sparkfun_avc RL_EVAL_JSON {"episodes": 1, "avg_reward": 848.8, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}
+waveshare RL_EVAL_JSON {"episodes": 1, "avg_reward": 888.9, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}
+generated_road RL_EVAL_JSON {"episodes": 1, "avg_reward": 851.4, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}
+roboracingleague_1 RL_EVAL_JSON {"episodes": 1, "avg_reward": 873.5, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}
+warehouse RL_EVAL_JSON {"episodes": 1, "avg_reward": 847.1, "avg_steps": 500.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 1, "max_steps": 500, "seeds": null}

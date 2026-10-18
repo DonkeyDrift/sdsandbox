@@ -387,3 +387,22 @@ done 时 -10。实现于临时 fork env 包装（不改仓库代码，journal �
 `outputs/rl_run_phase0kill.log`(首次死锁)、`outputs/rl_run_phase0kill2.log`(修复后)。
 
 下一步:Phase 1 鲁棒性续训(champion2 + lateral 2.2/heading 15/lr 1e-4,run-name robust2)。
+
+### 2026-10-18 13:55 并行推进:Phase2 课程就绪 / Phase3 回读兜底 / Phase4 多场景+导出脚本
+
+- **Phase 2 预置**(commit 105165e):`StickyActionWrapper`(--action-hold-prob/max)——
+  同步模式内以概率保持上一动作 1..N 物理步,模拟异步相位抖动。dummy 状态机单测
+  (hold 段 1+1..2、prob=0 直通)+ 单 env 实跑 6k 步验证(rl_run_sticktest.log)。
+- **Phase 3 前置**(commit 3a6352d):CameraSensor 回读超时兜底——pending >3s 判挂起,
+  丢弃+永久回退同步 ReadPixels+放行同步等帧门,根治离屏视觉 sim 的 AsyncGPUReadback
+  挂起。batchmode 编译 0 错误;功能验证安排在 Phase3 启动(app 重build+视觉探针)。
+- **Phase 4 预置**(commit 45a563c):`rl_eval --level` 多场景评测
+  (10 场景名→gym env id 映射)。
+- **Phase 4 零样本早测**(champion2,同步 500 步×1局/场景,日志
+  outputs/rl_eval_zeroshot_scenes.log):**9 个非训练场景全部 500/500 步零事故、
+  各完成 1 圈**——状态量观测(cte/进度为主)基本是场景无关的,无死区场景;
+  正式验收再放大局数/步数。
+- **Phase 4 导出脚本**:`src/export_onnx.py` 已写(MlpPolicy→ONNX,内嵌 action 反缩放,
+  附 8 维观测逐字段归一化 spec;数值一致性质检用 onnx.reference vs SB3 predict)。
+  待 onnx 包装好后跑 champion2 验证。
+- **Phase 1 robust2**:1.32M/2M 进行中,ep_len_mean ~1950 健康。
