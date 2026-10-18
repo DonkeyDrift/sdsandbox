@@ -58,6 +58,10 @@ def parse_args():
     parser.add_argument("--cam-fps", type=float, default=0.0,
                         help="异步训练遥测/控制频率(Hz,0=默认20):异步鲁棒微调用 40")
     parser.add_argument("--max-cte", type=float, default=2.5, help="出界 cross-track 误差阈值")
+    parser.add_argument("--action-hold-prob", type=float, default=0.0,
+                        help="控制延迟课程:每步以该概率保持上一动作(异步相位差模拟,Phase2 用 0.3)")
+    parser.add_argument("--action-hold-max", type=int, default=2,
+                        help="控制延迟课程:单次最多连续保持 1..N 个物理步")
     parser.add_argument("--seed", type=int, default=1, help="训练/出生随机种子")
     parser.add_argument("--save", default=None, help="最终模型保存路径(默认 outputs/rl_<algo>.zip)")
     parser.add_argument("--tb", default="outputs/rl_tb", help="tensorboard 日志目录")
@@ -90,6 +94,9 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
         if args.cam_fps > 0:
             conf["cam_config"]["fps"] = args.cam_fps  # 数值型:fork 有 fps>0 数值比较
         env = gym.make("donkey-mountain-track-v0", conf=conf)
+        if args.action_hold_prob > 0:
+            env = StickyActionWrapper(env, hold_prob=args.action_hold_prob,
+                                      hold_max=args.action_hold_max)
         if time_limit:
             # 本环境不自带步数上限(只 terminated 不 truncated);EvalCallback 的
             # evaluate_policy 没有步数预算,好策略永不撞墙会把评测永远挂住。
@@ -97,6 +104,35 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
         return env
 
     return _init
+
+
+class StickyActionWrapper(gym.Wrapper):
+    """控制延迟课程(Phase 2 异步鲁棒):每步以 hold_prob 概率保持上一动作,
+    单次连续保持 1..hold_max 个物理步。同步模式内模拟实时控制的相位抖动——
+    真实异步 20Hz 下动作实际作用于 5 个物理步、且遥测往返有相位差,
+    直接训出的策略对 delay 敏感(冠军异步必撞);先在同步里注入 delay 再续训。"""
+
+    def __init__(self, env, hold_prob=0.3, hold_max=2):
+        super().__init__(env)
+        self.hold_prob = hold_prob
+        self.hold_max = hold_max
+        self._held_action = None
+        self._hold_remaining = 0
+
+    def reset(self, **kwargs):
+        self._held_action = None
+        self._hold_remaining = 0
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        if self._hold_remaining > 0 and self._held_action is not None:
+            action = self._held_action
+            self._hold_remaining -= 1
+        else:
+            self._held_action = action
+            if self.env.unwrapped.np_random.random() < self.hold_prob:
+                self._hold_remaining = int(self.env.unwrapped.np_random.integers(1, self.hold_max + 1))
+        return self.env.step(action)
 
 
 def _close_vec_env(env):
