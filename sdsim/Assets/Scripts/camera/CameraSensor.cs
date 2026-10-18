@@ -33,7 +33,9 @@ public class CameraSensor : MonoBehaviour {
 	// 2022.3 中该 API 位于 UnityEngine.Rendering 命名空间(根命名空间无别名)
 	UnityEngine.Rendering.AsyncGPUReadbackRequest pendingReq;
 	bool hasPending;
-	bool readbackBroken;      // 请求出错后永久回退同步路径(只报一次)
+	float pendingKickTime;    // 发起回读的实时时钟,超时兜底用
+	public float readbackTimeoutSec = 3.0f; // 挂多久算卡死:离屏/遮挡下 GPU 回读可能永不完成
+	bool readbackBroken;      // 请求出错/超时后永久回退同步路径(只报一次)
 	bool fallbackLogged;
 	Thread encodeThread;
 	readonly ManualResetEventSlim encodeWake = new ManualResetEventSlim(false);
@@ -105,6 +107,20 @@ public class CameraSensor : MonoBehaviour {
 			return;
 
 		float t0 = Time.realtimeSinceStartup * 1000f;
+
+		if (hasPending && !pendingReq.done
+			&& Time.realtimeSinceStartup - pendingKickTime > readbackTimeoutSec)
+		{
+			// 超时兜底:离屏渲染/窗口遮挡下回读请求可能永不完成(挂起 N 秒),
+			// 同步步进会永久卡在等帧、异步推流停摆。丢弃请求并永久回退
+			// 同步 ReadPixels 路径(功能存活、每帧多 6-12ms 主线程开销),loud 记录。
+			hasPending = false;
+			pendingReq = default;
+			readbackBroken = true;
+			LastCompletedFrame = pendingKickSeq; // 放行同步步进的等帧门
+			Debug.LogWarning("[CameraSensor] AsyncGPUReadback 超时(>" + readbackTimeoutSec
+				+ "s,疑离屏/遮挡挂起),永久回退同步 ReadPixels 路径。");
+		}
 
 		if (hasPending && pendingReq.done)
 		{
@@ -196,6 +212,7 @@ public class CameraSensor : MonoBehaviour {
 			sensorCam.Render();
 			pendingReq = UnityEngine.Rendering.AsyncGPUReadback.Request(ren);
 			hasPending = true;
+			pendingKickTime = Time.realtimeSinceStartup;
 			pendingKickSeq = ++kickCount;
 		}
 		catch (System.Exception)
