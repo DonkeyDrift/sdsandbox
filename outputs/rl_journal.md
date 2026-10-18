@@ -406,3 +406,51 @@ done 时 -10。实现于临时 fork env 包装（不改仓库代码，journal �
   附 8 维观测逐字段归一化 spec;数值一致性质检用 onnx.reference vs SB3 predict)。
   待 onnx 包装好后跑 champion2 验证。
 - **Phase 1 robust2**:1.32M/2M 进行中,ep_len_mean ~1950 健康。
+
+### 2026-10-18 14:35 Phase 1 robust2 训练收束(1M 新步达标,主动按规格停)
+
+- **SB3 --steps 续训语义核实**:resume 时 `reset_num_timesteps=False` → learn 内部
+  `total_timesteps += num_timesteps`(模型终身计数),`--steps 2000000` 实际目标是
+  2M+resume点1.044M=3.044M = **再训 2M 新步**,与 handoff「续训 1M 步」规格不符。
+  日志 total_timesteps 到 2.13M(=1.09M 新步)时主动 SIGINT 按规格收束。
+  坑位记录:续训指定 --steps 要按「resume 点计数 + 新增步数」算,不是绝对累计。
+- **训练曲线**:ep_len_mean 从 2000 降到 1180 后企稳回升 1320(更难的 lateral 2.2/
+  heading 15 课程适应,非发散——ep_rew 全程稳定 ~2400,无 >40% 跌段)。
+- **产物**:rl_best_robust2/best_model.zip(14:12,eval 选优)、ckpt 到 ppo_1995000、
+  SIGINT 保命存档 ppo_crash_2130000_steps.zip(Phase0 基建首次实战生效);
+  中断后进程/端口零残留,孤儿 sim 按端口清理。
+- **验收门执行中**:held-out 8000-8019 ×20局 ×2500步 同步评测(门:crash<=5% 且
+  avg>=2400),随后 seed 7104 边缘出生 ×10局。日志 outputs/rl_acceptance_robust2_8k.log。
+
+### 2026-10-18 15:05 Phase 1 验收门结果:robust2 未过门,champion2 同域对照也不达标
+
+- **held-out 8000-8019 ×20局 ×2500步 同步验收**(门:crash<=5% 且 avg>=2400):
+  - robust2(best):**avg 2127.8、crash 3/20(15%)、laps 73**(outputs/rl_acceptance_robust2_8k.log)
+  - champion2 对照:avg 2257.0、crash 2/20(10%)、laps 70(outputs/rl_acceptance_champion2_8k.log)
+- **死因**:双方崩溃全部在 18-21 步内 cte≈2.5-2.66 纯越界(出生边界姿态,非行驶中
+  失稳);8012 双方同崩(该出生点固有难度),robust2 多崩 8008/8010,champion2 崩 8019。
+- **结论**:该种子域固有难度 + PhysX 方差下,两模型真实水平相当(robust2 不优于
+  champion2,lateral 2.2/heading 15 课程没有换来 held-out 鲁棒性,~10-15% 出生
+  边界崩溃是共同瓶颈)。**验收门未过,champion2 维持冠军,robust2 不入库**。
+- **复核中**:7100 域长测(11局×3000步)+ seed 7104 边缘出生×10局——这是 Phase1
+  真正目标口径(91%→≥98%),若 robust2 在原生口径显著更优再复议。
+
+### 2026-10-18 15:20 Phase 1 终审 + Phase 2 启动
+
+**Phase 1 终审结论**(全部证据落盘):
+- 7100 域长测(11局×3000步):robust2 11/11 满(rl_robust2_7k_long.log)、champion2
+  复测也 11/11(rl_champion2_7k_long.log,上次 10/11——PhysX 方差确认该域已不再区分)。
+- seed 7104 边缘出生×10局×500步:robust2 **10/10 全过**(rl_robust2_7104.log),
+  该项验收门通过。
+- 8000-8019 ×20局门(<=5% 且 avg>=2400):robust2 3/20、champion2 2/20,
+  **两代模型都不达标**——死因为出生边界 18-21 步纯越界(8012 双方同崩),属固有
+  难度+方差,非本课程可解。门未过,champion2 保留冠军位,robust2 以实测指标
+  快照入 halloffame(20261018-1510_robust2-2M-7k11of11-crash0-7104x10ok-8kcrash3)。
+- 附带教训:SB3 续训 `--steps` 语义 = resume 点计数 + 新增步数(非绝对累计),
+  本次按 2.6M=2.1M+500k 正确换算。
+
+**Phase 2 启动**(bash-2c94pgkv):从 robust2 best(2.1M)续训 500k 新步,
+`--action-hold-prob 0.3 --action-hold-max 2`(延迟课程)+ 标准救车课程
+lateral 1.8/heading 12 + lr 1e-4,run-name asyncrob,目标计数 2600000,
+保存 outputs/rl_asyncrob.zip。验收:A. 异步 20Hz 10局 avg>=1200/crash<=20%
+(需窗口 sim);B. 同步口径不回退(vs champion2 的 5000 域 avg2500/crash0)。
