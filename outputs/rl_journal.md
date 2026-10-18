@@ -497,3 +497,23 @@ lateral 1.8/heading 12 + lr 1e-4,run-name asyncrob,目标计数 2600000,
   异步 env(20Hz,与验收口径一致)+1 eval,500k 步,run-name asyncft3。
   若此次仍不能异步达标,Phase 2 结论改为「架构级限制,需 sim 侧定时器驱动+
   确定性相位协议」并转 Phase 3。
+
+### 2026-10-18 16:45 Phase 2 终审:架构级限制,收束转 Phase 3
+
+**asyncft3(有窗异步训练)实测证伪**:
+- 病态慢:首个 PPO rollout(2048 步)耗时 10 分钟(3.4 步/s 聚合);sims 遥测
+  20Hz 正常(tx_drop=0, sent 持续增长),CPU 62% idle——**纯延迟瓶颈非资源饱和**,
+  按此速度 500k 需 ~41 小时,不可行。
+- 期间并发问题:eval sim(9205)开局即 "Exception on recv. Connection dropped";
+  主进程假死表象实为 stdout 块缓冲 + 极慢步进(py-spy 未装完即收束,未深挖单步延迟
+  构成——记录为后续:异步 step 的 observe 等待/客户端 recv 线程值得用 py-spy 复查)。
+- **Phase 2 总 verdict**:
+  1) 延迟课程(同步内模拟):零迁移,同步口径反退化(40% 出生边界 crash),证伪;
+  2) 有窗异步训练:病态慢,不可行;
+  3) 异步鲁棒需架构级改动(sim 侧遥测定时器驱动 + 控制频率提升 + 确定性相位协议),
+     列为后续工作。**冠军同步体系不受损(champion2/robust2 保持)**。
+
+**Phase 3 启动**(bash-pe6ieq0a):vision2 = 7.5k 视觉基线 → 有窗异步续训 100k 新步
+(--envs 2 + 1 eval,端口 9201+,--eval-freq 20000 按上轮教训,run-name vision2,
+保存 outputs/rl_vision2.zip)。回读超时兜底(3a6352d)已在包内,挂起会 loud 回退
+而非冻死。验收门:held-out 10局 avg>=1500(基线 444)。
