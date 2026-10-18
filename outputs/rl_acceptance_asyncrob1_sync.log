@@ -1,0 +1,84 @@
+[UnityMemory] Configuration Parameters - Can be set up in boot.config
+    "memorysetup-bucket-allocator-granularity=16"
+    "memorysetup-bucket-allocator-bucket-count=8"
+    "memorysetup-bucket-allocator-block-size=4194304"
+    "memorysetup-bucket-allocator-block-count=1"
+    "memorysetup-main-allocator-block-size=16777216"
+    "memorysetup-thread-allocator-block-size=16777216"
+    "memorysetup-gfx-main-allocator-block-size=16777216"
+    "memorysetup-gfx-thread-allocator-block-size=16777216"
+    "memorysetup-cache-allocator-block-size=4194304"
+    "memorysetup-typetree-allocator-block-size=2097152"
+    "memorysetup-profiler-bucket-allocator-granularity=16"
+    "memorysetup-profiler-bucket-allocator-bucket-count=8"
+    "memorysetup-profiler-bucket-allocator-block-size=4194304"
+    "memorysetup-profiler-bucket-allocator-block-count=1"
+    "memorysetup-profiler-allocator-block-size=16777216"
+    "memorysetup-profiler-editor-allocator-block-size=1048576"
+    "memorysetup-temp-allocator-size-main=4194304"
+    "memorysetup-job-temp-allocator-block-size=2097152"
+    "memorysetup-job-temp-allocator-block-size-background=1048576"
+    "memorysetup-job-temp-allocator-reduction-small-platforms=262144"
+    "memorysetup-allocator-temp-initial-block-size-main=262144"
+    "memorysetup-allocator-temp-initial-block-size-worker=262144"
+    "memorysetup-temp-allocator-size-background-worker=32768"
+    "memorysetup-temp-allocator-size-job-worker=262144"
+    "memorysetup-temp-allocator-size-preload-manager=262144"
+    "memorysetup-temp-allocator-size-nav-mesh-worker=65536"
+    "memorysetup-temp-allocator-size-audio-worker=65536"
+    "memorysetup-temp-allocator-size-cloud-worker=32768"
+    "memorysetup-temp-allocator-size-gfx=262144"
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9301 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+INFO:gym_donkeycar.envs.donkey_sim:synchronous step mode enabled, time_step=0.05
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 0.0 seconds
+[rl_eval] 连接 127.0.0.1:9301 sync=True state_obs=True level=mountain_track
+starting DonkeyGym env
+Setting default: frame_skip 1
+Setting default: cam_resolution (120, 160, 3)
+Setting default: log_level 20
+Setting default: steer_limit 1.0
+Setting default: throttle_min 0.0
+Setting default: throttle_max 1.0
+Setting default: done_on_flip True
+Setting default: done_on_stuck True
+Setting default: stuck_time_thresh 2.5
+donkey subprocess started
+[rl_eval] ep0 (seed=5000): reward=5.2 steps=16 -> terminated(cte=2.51 hit=none flipped=False stuck=0.0 lap=0 pos=(2.70165753364563, 0.461819291114807, 12.4007186889648))
+[rl_eval] ep1 (seed=5001): reward=7.8 steps=18 -> terminated(cte=2.50 hit=none flipped=False stuck=0.0 lap=0 pos=(-1.01307785511017, 0.720838129520416, 7.97489261627197))
+[rl_eval] ep2 (seed=5002): reward=4824.5 steps=2500 -> max_steps
+[rl_eval] ep3 (seed=5003): reward=5.2 steps=16 -> terminated(cte=2.57 hit=none flipped=False stuck=0.0 lap=0 pos=(-2.96721410751343, 0.706416606903076, 5.98307609558105))
+[rl_eval] ep4 (seed=5004): reward=4886.3 steps=2500 -> max_steps
+[rl_eval] ep5 (seed=5005): reward=4854.6 steps=2500 -> max_steps
+[rl_eval] ep6 (seed=5006): reward=6.3 steps=15 -> terminated(cte=2.54 hit=none flipped=False stuck=0.0 lap=0 pos=(6.40931034088135, 0.698780655860901, 7.63246393203735))
+[rl_eval] ep7 (seed=5007): reward=4864.6 steps=2500 -> max_steps
+[rl_eval] ep8 (seed=5008): reward=4829.3 steps=2500 -> max_steps
+[rl_eval] ep9 (seed=5009): reward=4872.3 steps=2500 -> max_steps
+closing donkey sim subprocess
+[rl_eval] 平均 reward=2915.6 平均步数=1506 (1 步=0.05s 仿真)
+RL_EVAL_JSON {"episodes": 10, "avg_reward": 2915.6, "avg_steps": 1506.5, "crash_episodes": 4, "crash_rate": 0.4, "laps": 26, "max_steps": 2500, "seeds": [5000, 5001, 5002, 5003, 5004, 5005, 5006, 5007, 5008, 5009]}

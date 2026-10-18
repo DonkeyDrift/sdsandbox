@@ -454,3 +454,46 @@ done 时 -10。实现于临时 fork env 包装（不改仓库代码，journal �
 lateral 1.8/heading 12 + lr 1e-4,run-name asyncrob,目标计数 2600000,
 保存 outputs/rl_asyncrob.zip。验收:A. 异步 20Hz 10局 avg>=1200/crash<=20%
 (需窗口 sim);B. 同步口径不回退(vs champion2 的 5000 域 avg2500/crash0)。
+
+### 2026-10-18 15:50 Phase 2 首轮失败与修正(重要语义澄清)
+
+- **hold=0.3 首轮(asyncrob,37k 步)失败**:ep_len_mean 钉死在 ~75 不升——相位敏感
+  策略在 30% 保持率下每局 ~3.5s 即崩,episode 全同构无学习梯度。教训:延迟课程
+  起点必须让策略"活着",0.3 对冷启动太陡。
+- **hold=0.1 次轮(asyncrob1)成功适应**:ep_len 213→279(92k)→430(200k)持续爬升,
+  fps 470 健康。
+- **--steps 语义最终澄清**(两次踩坑后定案):SB3 续训 `learn(steps, reset_num_timesteps
+  =False)` 内部目标 = steps + 模型当前终身计数,**--steps 直接就是"新增步数"**。
+  robust2 用 --steps 2000000 实际要训 2M 新步(超规格,手动停在 1.09M);
+  asyncrob1 用 --steps 2300000 = 2.3M 新步(本意 200k 探针)——日志显示的
+  total_timesteps 是终身计数(起步 2.1M),不要把它当进度分母。
+- **决策**:asyncrob1 不 interrupt,让 lifetime 到 2.8M(=700k 新步,超预期 500k
+  规格,cron 到点 SIGINT 收束)——曲线仍在陡升,多训便宜;收束后跑 Phase2 双口径验收
+  (同步 5000 域对照 + 异步 20Hz 8100 域,门 avg>=1200/crash<=20%)。
+
+### 2026-10-18 16:05 Phase 2 验收A(同步口径):未过门——延迟课程拆东墙
+
+- asyncrob1(best 与 final ckpt 数字一致)同步 5000 域:**avg 1506.6、crash 4/10(40%)、
+  laps 26**(rl_acceptance_asyncrob1_sync.log / _final_sync.log);
+  对照 champion2 同域 avg 2500.0/crash 0。门「同步口径不回退」**未过**。
+- 死因全部是出生边界 15-18 步 cte≈2.5 越界(seeds 5000/5001/5003/5006)——延迟课程
+  让策略习惯了"动作会延迟",对出生瞬间的高增益纠偏变得保守/相位错乱,
+  出生边界崩溃面从 1/10 扩到 4/10。行驶中能力未损(存活局 laps 26 vs champion2 39,
+  单圈能力仍在)。
+- 等验收B(异步 20Hz 8100 域)数据齐了再定 Phase 2 结论:若异步大幅达标而同步崩,
+  则延迟课程是零和 trade-off,需要换思路(如双策略/自适应)。
+
+### 2026-10-18 16:15 Phase 2 验收B(异步口径):未过门——延迟课程零迁移,Phase2 首选方案证伪
+
+- asyncrob1 异步 20Hz 8100 域:**avg 203.7 步、crash 10/10(100%)**(门 avg>=1200/
+  crash<=20%,rl_acceptance_asyncrob1_async.log)。基线对比:champion2 异步 5/5 秒崩
+  ~75 步——延迟课程只把异步存活从 ~75 提到 ~204,远不够。
+- **根因分析**:StickyActionWrapper 注入的是「动作保持但观测严格同步」(每步观测
+  仍是执行后新状态);真实异步是「动作周期 50ms + 遥测相位差 + 观测滞后」,
+  动力学根本不同。同步内模拟延迟 ≠ 异步动力学,**首选方案(无需改 sim)证伪**。
+- 行驶能力未丢(异步也跑了 4 圈),瓶颈仍在控制相位敏感性。
+- **Phase 2 结论**:双门均未过,延迟课程废弃。唯一可行路径=**有窗异步训练**
+  (异步评测链路本次已验证健康:10 局完整跑完),启动 asyncft3:robust2 → 4 有窗
+  异步 env(20Hz,与验收口径一致)+1 eval,500k 步,run-name asyncft3。
+  若此次仍不能异步达标,Phase 2 结论改为「架构级限制,需 sim 侧定时器驱动+
+  确定性相位协议」并转 Phase 3。
