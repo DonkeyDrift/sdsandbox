@@ -42,16 +42,29 @@
 
 ## RL 训练实操沉淀(2026-10-18 闭环实战)
 
-- 命令:`python3 src/rl_train.py --resume <模型> --run-name <名> --envs 4 --steps <目标计数>`(续训计数累计);
+- 命令:`python3 src/rl_train.py --resume <模型> --run-name <名> --envs 4 --steps N`;
   评测:`python3 src/rl_eval.py --model <m> --seed-base 5000 --episodes 10 --max-steps 2500 --json --launch-sim --port 9301 --sync --time-step 0.05`。
+- **--steps 语义(2026-10-18 两次踩坑定案)**:续训时 SB3 内部目标 = `--steps` + 模型终身计数,
+  即 **--steps 直接就是"新增步数"**(不是绝对累计)。日志里 total_timesteps 是终身计数,
+  别把它当进度分母;进度 = total_timesteps - resume 点计数。
+- **续训 lr 铁律(两次复发)**:从小模型/早期模型续训,PPO 默认 lr 3e-4 必过热发散
+  (ep_len/ep_rew 数 rollout 内单调跌 >30% 即止损),一律 `--lr 1e-4` 起步。
+- **异步鲁棒结论(2026-10-18 Phase 2 证伪)**:① 同步内动作延迟课程(StickyActionWrapper)
+  对真实异步**零迁移**——延迟注入下观测仍严格同步,与真实异步的动力学不同;还会拆东墙
+  (同步口径出生边界 crash 1/10→4/10)。② 有窗异步训练病态慢(实测 3.4 步/s 聚合、CPU 62%
+  idle=纯延迟瓶颈,500k 需 ~41h)不可行。异步鲁棒需架构级改动(sim 遥测定时器驱动+相位协议)。
+- **Phase 1 结论(2026-10-18)**:lateral 2.2/heading 15 加强课程不换来 held-out 鲁棒性;
+  7100 域长测与 7104 边缘出生可达 100%/10 连过,但出生边界 18-21 步越界是个体种子固有
+  难度+PhysX 方差,严格门(如 8000 域 crash<=5%)两代模型都不达标——按多域口径综合判定。
 - **验收用同步模式**:异步 20Hz 评测会惩罚高增益策略(救车动作失稳),同步 0.05s 才是训练执行语义。
 - **PhysX 多线程非确定**:同模型同种子局级结果有位级方差,验收按多次/长局口径判定。
 - 铁律:训练运行期间清理 sim 只按端口 `lsof -ti:<ports> | xargs kill`,**严禁 `pkill -f donkey_sim`**(两次误杀训练);
   补丁后必须单环境实跑验证(py_compile 不够);`time/fps >600` 或 ep_rew 冻结=假步进,立即查 sim 存活。
 - PPO 续训已收敛模型默认 lr 即可;真正的杠杆是**出生课程**(lateral 1.8±种子随机/heading 12,
   救车能力)与堆里程;评测上限 2000 会被饱和型策略打满,需结合 held-out 种子测。
-- 视觉训练:`--vision --async-mode --eval-freq 20000`(同步模式的 AsyncGPUReadback 在离屏/遮挡下挂起;
-  异步评测 3×2000 步一次约 7 分钟,频率必须调低);resume 路径不带 .zip 后缀(SB3 会自动补)。
+- 视觉训练:`--vision --async-mode --eval-freq 20000 --lr 1e-4`(同步模式的 AsyncGPUReadback 在离屏/遮挡下挂起;
+  异步评测 3×2000 步一次约 7 分钟,频率必须调低);resume 路径不带 .zip 后缀(SB3 会自动补);
+  已加回读超时兜底(CameraSensor,挂起 3s→回退同步 ReadPixels loud 记录),离屏长训不再冻死。
 - 多训练并行必须 `--run-name` 隔离(best/ckpt 目录),端口分段 9101+ / 9201+。
 - 相机跟随在同步模式冻结的坑:`CameraFollow` 原为 FixedUpdate + deltaTime 缩放——timeScale=0 时
   FixedUpdate 不跑且 deltaTime 恒 0,相机永久停在出生位。已改 Update + unscaledDeltaTime。
