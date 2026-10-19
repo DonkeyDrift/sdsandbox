@@ -1,0 +1,42 @@
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9091 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+[rl_eval] 连接 127.0.0.1:9091 sync=False state_obs=False level=mountain_track
+starting DonkeyGym env
+Setting default: frame_skip 1
+Setting default: log_level 20
+Setting default: steer_limit 1.0
+Setting default: throttle_min 0.0
+Setting default: throttle_max 1.0
+Setting default: done_on_flip True
+Setting default: done_on_stuck True
+Setting default: stuck_time_thresh 2.5
+[rl_eval] 视觉叠帧 x4(合并通道)
+[rl_eval] 现场录帧开启 -> outputs/rec_cp100_8200 (每局末 24 帧)
+[rl_eval] ep0 (seed=8200): reward=-10.4 steps=1771 mean_speed=0.02 PARKED(fail) -> terminated(cte=2.50 hit=none flipped=False stuck=0.0 lap=0 pos=(-8.14031028747559, 0.683460831642151, 6.46979761123657))
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep00_seed8200_crash 帧差=6.36
+[rl_eval] ep1 (seed=8201): reward=58.3 steps=185 mean_speed=0.49 PARKED(fail) -> terminated(cte=2.51 hit=none flipped=False stuck=0.0 lap=0 pos=(0.556282758712769, 0.541782259941101, 0.13457065820694))
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep01_seed8201_crash 帧差=15.15
+[rl_eval] ep2 (seed=8202): reward=-0.6 steps=2500 mean_speed=0.00 PARKED(fail) -> max_steps
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep02_seed8202_survive 帧差=0.55
+[rl_eval] ep3 (seed=8203): reward=0.6 steps=2500 mean_speed=0.00 PARKED(fail) -> max_steps
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep03_seed8203_survive 帧差=0.51
+[rl_eval] ep4 (seed=8204): reward=-4.3 steps=239 mean_speed=0.12 PARKED(fail) -> terminated(cte=2.50 hit=none flipped=False stuck=2.4 lap=0 pos=(-5.74583673477173, 0.650123536586761, 11.7389345169067))
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep04_seed8204_crash 帧差=5.44
+[rl_eval] ep5 (seed=8205): reward=-0.2 steps=2500 mean_speed=0.00 PARKED(fail) -> max_steps
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep05_seed8205_survive 帧差=0.50
+[rl_eval] ep6 (seed=8206): reward=50.1 steps=579 mean_speed=0.31 PARKED(fail) -> terminated(cte=2.51 hit=none flipped=False stuck=0.0 lap=0 pos=(0.347924262285233, 0.322650521993637, 12.467845916748))
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep06_seed8206_crash 帧差=4.51
+[rl_eval] ep7 (seed=8207): reward=-0.2 steps=2500 mean_speed=0.00 PARKED(fail) -> max_steps
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep07_seed8207_survive 帧差=0.41
+[rl_eval] ep8 (seed=8208): reward=11.5 steps=1358 mean_speed=0.04 PARKED(fail) -> terminated(cte=2.50 hit=none flipped=False stuck=0.0 lap=0 pos=(-0.31081885099411, 0.318270355463028, 12.5640916824341))
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep08_seed8208_crash 帧差=0.67
+[rl_eval] ep9 (seed=8209): reward=0.0 steps=2500 mean_speed=0.00 PARKED(fail) -> max_steps
+[rl_eval] 现场 -> outputs/rec_cp100_8200/ep09_seed8209_survive 帧差=0.73
+[rl_eval] 有效局 0/10(parked 剔除 10) 平均 reward=0.0 平均步数=0 平均速度=0.00
+RL_EVAL_JSON {"episodes": 10, "valid_episodes": 0, "parked_episodes": 10, "avg_reward": 0.0, "avg_steps": 0.0, "mean_speed": 0.0, "progress_gate": 1.0, "park_epsilon": 2.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 0, "max_steps": 2500, "per_episode": [{"reward": -10.4, "steps": 1771, "mean_speed": 0.022, "parked": true, "reason": "terminated(cte=2.50 hit=none flipped=Fal"}, {"reward": 58.3, "steps": 185, "mean_speed": 0.489, "parked": true, "reason": "terminated(cte=2.51 hit=none flipped=Fal"}, {"reward": -0.6, "steps": 2500, "mean_speed": 0.001, "parked": true, "reason": "max_steps"}, {"reward": 0.6, "steps": 2500, "mean_speed": 0.001, "parked": true, "reason": "max_steps"}, {"reward": -4.3, "steps": 239, "mean_speed": 0.12, "parked": true, "reason": "terminated(cte=2.50 hit=none flipped=Fal"}, {"reward": -0.2, "steps": 2500, "mean_speed": 0.0, "parked": true, "reason": "max_steps"}, {"reward": 50.1, "steps": 579, "mean_speed": 0.31, "parked": true, "reason": "terminated(cte=2.51 hit=none flipped=Fal"}, {"reward": -0.2, "steps": 2500, "mean_speed": 0.0, "parked": true, "reason": "max_steps"}, {"reward": 11.5, "steps": 1358, "mean_speed": 0.042, "parked": true, "reason": "terminated(cte=2.50 hit=none flipped=Fal"}, {"reward": 0.0, "steps": 2500, "mean_speed": 0.001, "parked": true, "reason": "max_steps"}], "seeds": [8200, 8201, 8202, 8203, 8204, 8205, 8206, 8207, 8208, 8209]}
