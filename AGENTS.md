@@ -84,6 +84,13 @@
   否则摊匀半途被挡、最后一个控制步永远卡死);② 相机必须 `LateUpdate`(Update 阶段才 Simulate,
   Update 跟随会读到步进前车位,有/无子步帧交替成前后抖);③ 朝向必须低通(`rotSmoothTime` 0.35s),
   硬拷贝朝向会把策略高频转向修正 1:1 晃到画面上。
+- **第三人称相机稳定化(2026-10-20,无人机视角)**:`CameraFollow` 位置不再整体硬挂载——锚点
+  `CameraFollowTm` 是车体刚性子节点(车后 4m),车身左右平移+偏航抖动经杠杆 1:1 横移相机、
+  世界横屏致眩晕。现改为平滑 yaw 系内**分轴滤波**:纵向/垂直硬跟随(保住无前后窜动修复),
+  仅横向低通(`latSmoothTime` 0.25s),车可在画面内小幅左右滑、背景锁定;朝向 yaw 低通 +
+  roll 锁定(`Quaternion.Euler(pitch0, smoothedYaw, 0)`,俯角取锚点 prefab 固定值,悬挂侧倾/
+  车身俯仰不进画面);`snapDistance` 8m 或换绑 target 时位姿硬设,reset 瞬移不拖尾。
+  车上 `CameraSensor`(策略视觉输入)不受影响。
 - **headless 异步训练不可行**(2026-10-18 v2 实测):-batchmode -nographics 下异步观测流 ~1fps
   (疑依附相机渲染);异步路线只能有窗。tb 目录会被多次 run 复用(PPO_N 混写),分析前先按
   event 文件时间戳归属,勿整目录聚合误读。
