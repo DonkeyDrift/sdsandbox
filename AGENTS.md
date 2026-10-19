@@ -44,6 +44,7 @@
 
 - 命令:`python3 src/rl_train.py --resume <模型> --run-name <名> --envs 4 --steps N`;
   评测:`python3 src/rl_eval.py --model <m> --seed-base 5000 --episodes 10 --max-steps 2500 --json --launch-sim --port 9301 --sync --time-step 0.05`。
+  评测加 `--record <目录>` 落现场(末 24 帧+蒙太奇+meta.json,供逐帧复核死因);视觉/录帧评测经 `--launch-sim` 时自动带离屏渲染(依赖 fork >= 1b05bae,此前 headless_keep_gfx 是死键会跑盲图)。
 - **--steps 语义(2026-10-18 两次踩坑定案)**:续训时 SB3 内部目标 = `--steps` + 模型终身计数,
   即 **--steps 直接就是"新增步数"**(不是绝对累计)。日志里 total_timesteps 是终身计数,
   别把它当进度分母;进度 = total_timesteps - resume 点计数。

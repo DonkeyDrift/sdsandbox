@@ -67,6 +67,81 @@ class MergeStack(gym.Wrapper):
         return self._merge(obs), r, term, trunc, info
 
 
+class RecorderWrapper(gym.Wrapper):
+    """现场录帧(crash forensics):每步截取 policy 视角画面入环形缓冲,每局结束
+    落盘——末 N 帧序列 + 16 格蒙太奇 + meta.json,供赛后多模态逐帧复核死因
+    (替代纯坐标聚类推断)。
+
+    取帧优先级:① 叠帧观测 (3N,H,W) → 最新帧=末 3 通道(与 MergeStack/
+    VecFrameStack 帧序一致);② 单帧图像观测 (H,W,C) 直接用;③ 状态量观测 →
+    env.unwrapped.viewer.handler.image_array(fork 只要遥测带 JPG 就持续解码,
+    与观测类型无关;要求 cam_config img_enc 非 none,--record 时会强制 JPG)。"""
+
+    def __init__(self, env, out_dir, keep=24, scale=2):
+        super().__init__(env)
+        import collections
+        self._buf = collections.deque(maxlen=keep)
+        self._out_dir = out_dir
+        self._scale = scale
+        self._zero_frames = 0
+
+    def _latest_frame(self, obs):
+        arr = np.asarray(obs)
+        if arr.ndim == 3 and arr.shape[0] > 3 and arr.shape[0] % 3 == 0 and arr.shape[-1] not in (1, 3):
+            return arr[-3:].transpose(1, 2, 0)  # 叠帧:新帧在末 3 通道
+        if arr.ndim == 3 and arr.shape[-1] in (1, 3):
+            return arr
+        return self.env.unwrapped.viewer.handler.image_array  # 状态量:遥测画面
+
+    def reset(self, **kwargs):
+        self._buf.clear()
+        self._zero_frames = 0
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        obs, r, term, trunc, info = self.env.step(action)
+        frame = np.asarray(self._latest_frame(obs))
+        if frame.ndim == 3 and frame.shape[-1] == 1:
+            frame = np.repeat(frame, 3, axis=-1)
+        if frame.size and not frame.any():
+            self._zero_frames += 1
+        self._buf.append(frame)
+        return obs, r, term, trunc, info
+
+    def save_episode(self, ep, seed, meta):
+        import json
+        import os
+        from PIL import Image
+
+        tag = "crash" if str(meta.get("reason", "")).startswith("terminated") else "survive"
+        ep_dir = os.path.join(self._out_dir, "ep%02d_seed%d_%s" % (ep, seed, tag))
+        frames_dir = os.path.join(ep_dir, "frames")
+        os.makedirs(frames_dir, exist_ok=True)
+
+        frames = list(self._buf)
+        for i, fr in enumerate(frames):
+            Image.fromarray(fr).save(os.path.join(frames_dir, "f_%04d.jpg" % i), quality=90)
+
+        tail = frames[-16:]  # 蒙太奇:末 16 帧,4 列,行优先时间从早到晚
+        cols, rows = 4, max(1, -(-len(tail) // 4))
+        h, w = tail[0].shape[:2]
+        sheet = Image.new("RGB", (cols * w * self._scale, rows * h * self._scale))
+        for i, fr in enumerate(tail):
+            img = Image.fromarray(fr).resize((w * self._scale, h * self._scale), Image.NEAREST)
+            sheet.paste(img, ((i % cols) * w * self._scale, (i // cols) * h * self._scale))
+        sheet.save(os.path.join(ep_dir, "montage.jpg"), quality=90)
+
+        meta = dict(meta, episode=ep, seed=seed, frames_saved=len(frames),
+                    zero_frames=self._zero_frames,
+                    montage="末 %d 帧,4 列,行优先时间从早到晚,左上最旧右下最新" % len(tail))
+        with open(os.path.join(ep_dir, "meta.json"), "w") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2, default=str)
+        if self._zero_frames:
+            print("[rl_eval] 警告: %d/%d 帧全黑——遥测无图像?(state 观测需 img_enc 非 none)"
+                  % (self._zero_frames, len(frames)))
+        return ep_dir
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a trained PPO policy against DonkeySim")
     parser.add_argument("--model", default="outputs/rl_ppo.zip", help="模型路径")
@@ -99,6 +174,10 @@ def parse_args():
                              "动作-观测配对与同步 time_step 同构——同步冠军无需重训即可异步驾驶")
     parser.add_argument("--level", default="mountain_track",
                         help="场景名(Phase4 多场景零样本):%s" % ",".join(sorted(LEVEL_TO_ENV)))
+    parser.add_argument("--record", default=None,
+                        help="现场录帧目录(如 outputs/rl_replay_8000):每局结束导出末 N 帧+蒙太奇+meta.json,"
+                             "供赛后逐帧复核死因;状态量观测时强制 img_enc=JPG(渲染+编码,评测略慢)")
+    parser.add_argument("--record-frames", type=int, default=24, help="每局保留的末尾帧数(默认 24)")
     return parser.parse_args()
 
 
@@ -123,6 +202,11 @@ def main():
         conf["ctl_step_ms"] = args.ctl_step  # 量化异步控制(相位协议)
     if not args.state_obs:
         conf["cam_resolution"] = (120, 160, 3)
+    if args.record and args.state_obs:
+        conf["cam_config"] = {"img_enc": "JPG"}  # 录帧强制有图(state 观测默认 none 会全黑)
+    if args.launch_sim and (not args.state_obs or args.record):
+        # -nographics 下相机不渲染(遥测恒灰图,视觉评测会变"盲测");keep_gfx=离屏渲染
+        conf["headless_keep_gfx"] = True
 
     env_id = LEVEL_TO_ENV.get(args.level)
     if env_id is None:
@@ -134,6 +218,9 @@ def main():
         from gymnasium.wrappers import FrameStackObservation
         env = MergeStack(FrameStackObservation(env, stack_size=args.frame_stack))
         print("[rl_eval] 视觉叠帧 x%d(合并通道)" % args.frame_stack)
+    if args.record:
+        env = RecorderWrapper(env, args.record, keep=args.record_frames)
+        print("[rl_eval] 现场录帧开启 -> %s (每局末 %d 帧)" % (args.record, args.record_frames))
     try:
         model = PPO.load(args.model)
     except Exception:
@@ -166,6 +253,14 @@ def main():
                 break
         results.append((total, steps, reason, info.get("lap", 0)))
         print("[rl_eval] ep%d (seed=%d): reward=%.1f steps=%d -> %s" % (ep, ep_seed, total, steps, reason))
+        if args.record:
+            rec_dir = env.save_episode(ep, ep_seed, {
+                "model": args.model, "level": args.level, "sync_mode": args.sync_mode,
+                "ctl_step": args.ctl_step, "frame_stack": args.frame_stack,
+                "state_obs": args.state_obs, "reward": round(total, 1), "steps": steps,
+                "reason": reason, "lap": info.get("lap", 0),
+            })
+            print("[rl_eval] 现场 -> %s" % rec_dir)
 
     env.close()
     avg_r = sum(r[0] for r in results) / len(results)
