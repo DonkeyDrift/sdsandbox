@@ -50,6 +50,8 @@ def parse_args():
     parser.add_argument("--time-step", type=float, default=0.05)
     parser.add_argument("--vision", dest="state_obs", action="store_false", default=True,
                         help="图像观测(训练的 CNN 模型)")
+    parser.add_argument("--frame-stack", type=int, default=0,
+                        help="视觉观测叠帧 N(需与训练一致,观测 (3N,120,160))")
     parser.add_argument("--spawn", dest="spawn", action="store_true", default=True,
                         help="随机出生(默认,与训练一致)")
     parser.add_argument("--no-spawn", dest="spawn", action="store_false", help="固定出生点")
@@ -98,7 +100,16 @@ def main():
     print("[rl_eval] 连接 127.0.0.1:%d sync=%s state_obs=%s level=%s" %
           (args.port, args.sync_mode, args.state_obs, args.level))
     env = gym.make(env_id, conf=conf)
-    model = PPO.load(args.model)
+    if args.frame_stack > 0:
+        from gymnasium.wrappers import FrameStackObservation
+        env = FrameStackObservation(env, stack_size=args.frame_stack, channel_order="first")
+        print("[rl_eval] 视觉叠帧 x%d" % args.frame_stack)
+    try:
+        model = PPO.load(args.model)
+    except Exception:
+        from stable_baselines3 import SAC
+        model = SAC.load(args.model)
+        print("[rl_eval] SAC 模型已加载")
 
     results = []
     for ep in range(args.episodes):

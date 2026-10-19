@@ -16,7 +16,7 @@ import numpy as np
 import gymnasium as gym
 import gym_donkeycar  # noqa: F401 注册 donkey-* env
 from stable_baselines3 import PPO, SAC
-from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback, EvalCallback
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback, EvalCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 
 SPAWN_DEFAULT = {
@@ -48,6 +48,9 @@ def parse_args():
     parser.add_argument("--async-mode", dest="sync_mode", action="store_false", help="异步遥测模式")
     parser.add_argument("--state-obs", dest="state_obs", action="store_true", default=True, help="状态量观测(默认)")
     parser.add_argument("--vision", dest="state_obs", action="store_false", help="图像观测(CNN 策略)")
+    parser.add_argument("--frame-stack", type=int, default=0,
+                        help="视觉观测叠帧 N(仅 --vision):观测变 (3N,120,160),时序信息单因子;"
+                             "注意与单帧模型不兼容(conv 输入通道数变),需从头训")
     parser.add_argument("--img-enc", default="none", help="无图像观测时的 cam_config img_enc(默认 none)")
     parser.add_argument("--time-step", type=float, default=0.05, help="同步步进步长(秒)")
     parser.add_argument("--spawn", dest="spawn", action="store_true", default=True, help="随机出生到赛道节点(默认)")
@@ -63,6 +66,8 @@ def parse_args():
                              "动作-观测配对与同步 time_step 同构(异步训练配 --async-mode 用)")
     parser.add_argument("--keep-gfx", dest="keep_gfx", action="store_true", default=False,
                         help="异步状态量训练用 -batchmode 离屏渲染(不弹窗但主循环全速,量化遥测需要;headless 下异步流可能 ~1fps)")
+    parser.add_argument("--freeze-actor-steps", type=int, default=0,
+                        help="SAC 热启动专用:前 N 步冻结 actor 只训 critic(critic 冷启动保护),N 步后解冻")
     parser.add_argument("--max-cte", type=float, default=2.5, help="出界 cross-track 误差阈值")
     parser.add_argument("--action-hold-prob", type=float, default=0.0,
                         help="控制延迟课程:每步以该概率保持上一动作(异步相位差模拟,Phase2 用 0.3)")
@@ -191,6 +196,23 @@ class ActionDelayWrapper(gym.Wrapper):
         return self.env.step(old)
 
 
+class ActorUnfreezeCallback(BaseCallback):
+    """SAC 热启动:N 步后解冻 actor(critic 冷启动保护期结束)。"""
+
+    def __init__(self, unfreeze_at):
+        super().__init__()
+        self.unfreeze_at = unfreeze_at
+        self._done = False
+
+    def _on_step(self):
+        if not self._done and self.model.num_timesteps >= self.unfreeze_at:
+            for p in self.model.policy.actor.parameters():
+                p.requires_grad_(True)
+            self._done = True
+            print("[rl_train] num_timesteps=%d:actor 已解冻" % self.model.num_timesteps)
+        return True
+
+
 def _close_vec_env(env):
     """收尾关闭 VecEnv。中断时 worker 可能卡在同步步进的 sim 等待上,优雅 close 会
     在 pipe.recv() 死等(gymnasium 对 idle worker 的 close 无超时);先给 10s 优雅窗口,
@@ -230,6 +252,13 @@ def main():
     envs = SubprocVecEnv([make_env(rank, args, spawn_cfg, headless, img_enc,
                                    time_limit=args.train_time_limit) for rank in range(args.envs)])
     envs = VecMonitor(envs)
+    if args.frame_stack > 0:
+        if args.state_obs:
+            raise SystemExit("--frame-stack 仅视觉观测适用")
+        from stable_baselines3.common.vec_env import VecFrameStack
+        envs = VecFrameStack(envs, n_stack=args.frame_stack, channels_order="first")
+        print("[rl_train] 视觉叠帧 x%d,观测 (3x%d,120,160)——从头训(与单帧模型通道不兼容)" % (
+            args.frame_stack, args.frame_stack))
 
     policy = "MlpPolicy" if args.state_obs else "CnnPolicy"
     if args.resume:
@@ -265,12 +294,23 @@ def main():
         eval_env = SubprocVecEnv([make_env(args.envs, args, spawn_cfg, headless, img_enc, time_limit=2000)
                                   for _ in range(args.eval_envs)])
         eval_env = VecMonitor(eval_env)
+        if args.frame_stack > 0:
+            from stable_baselines3.common.vec_env import VecFrameStack
+            eval_env = VecFrameStack(eval_env, n_stack=args.frame_stack, channels_order="first")
         callbacks.append(EvalCallback(
             eval_env, best_model_save_path="outputs/rl_best_%s/" % args.run_name,
             log_path="outputs/rl_best_%s/" % args.run_name,
             eval_freq=args.eval_freq, n_eval_episodes=3, deterministic=True,
         ))
         print("[rl_train] 自动评测开启:每 %d 次回调评 3 局,最佳模型存 outputs/rl_best_%s/" % (args.eval_freq, args.run_name))
+
+    if args.freeze_actor_steps > 0:
+        if args.algo != "sac":
+            raise SystemExit("--freeze-actor-steps 仅 SAC 热启动适用")
+        for p in model.policy.actor.parameters():
+            p.requires_grad_(False)
+        print("[rl_train] actor 已冻结,前 %d 步单训 critic" % args.freeze_actor_steps)
+        callbacks.append(ActorUnfreezeCallback(args.freeze_actor_steps))
 
     try:
         model.learn(args.steps, callback=CallbackList(callbacks), reset_num_timesteps=not bool(args.resume),
