@@ -36,6 +36,8 @@ def parse_args():
                         help="覆盖学习率(续训已收敛模型建议 1e-4,默认按算法内置)")
     parser.add_argument("--ent-coef", type=float, default=None,
                         help="覆盖 PPO 熵系数(默认 0.01;策略退化时可降到 0.003)")
+    parser.add_argument("--epochs", type=int, default=None,
+                        help="PPO n_epochs(默认 10;视觉叠帧 CNN 更新重,2-4 档换吞吐)")
     parser.add_argument("--envs", type=int, default=2, help="并行训练 sim/worker 数")
     parser.add_argument("--eval-envs", type=int, default=1, help="评测专用 sim 数(0=关闭自动评测/最佳模型保存)")
     parser.add_argument("--eval-freq", type=int, default=2500, help="评测间隔(回调次数,4 env 时约每 1 万环境步)")
@@ -310,6 +312,7 @@ def main():
         model = PPO(
             policy, envs,
             n_steps=512, batch_size=128, gamma=0.99, gae_lambda=0.95,
+            n_epochs=args.epochs if args.epochs is not None else 10,
             ent_coef=args.ent_coef if args.ent_coef is not None else 0.01,
             learning_rate=args.lr if args.lr is not None else 3e-4,
             seed=args.seed, tensorboard_log=args.tb, verbose=1,
