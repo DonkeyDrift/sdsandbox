@@ -619,7 +619,7 @@ namespace tk
 
             // 量化异步控制(car_config "ctl_step_ms": 数值,毫秒;0/缺省=旧行为)
             float ctlStepMs = NumField(json, "ctl_step_ms", 0f);
-            ctlStepSec = ctlStepMs > 0f ? Mathf.Max(ctlStepMs / 1000f, 0.02f) : 0f;
+            ctlStepSec = ctlStepMs > 0f ? Mathf.Max(ctlStepMs / 1000f, 0.01f) : 0f;
             nextCtlBoundary = -1f;
             ctlBuffered = false;
 
