@@ -71,6 +71,9 @@ def parse_args():
     parser.add_argument("--action-delay", type=int, default=0,
                         help="真·动作延迟(步):执行 N 步之前的动作,当前动作入队——精确模拟量化异步协议 "
                              "(ctl_step_ms)的固有死时间;1 = 延迟一步(与 --ctl-step 50 协议等价)")
+    parser.add_argument("--action-jitter", type=int, default=0,
+                        help="延迟抖动域随机(需配 --action-delay):每步从最近 K 个动作里均匀随机执行一个,"
+                             "覆盖真实异步的时钟抖动/控制丢帧(策略动作偶发被跳过或重复)")
     parser.add_argument("--seed", type=int, default=1, help="训练/出生随机种子")
     parser.add_argument("--save", default=None, help="最终模型保存路径(默认 outputs/rl_<algo>.zip)")
     parser.add_argument("--tb", default="outputs/rl_tb", help="tensorboard 日志目录")
@@ -111,7 +114,7 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
             env = StickyActionWrapper(env, hold_prob=args.action_hold_prob,
                                       hold_max=args.action_hold_max)
         if args.action_delay > 0:
-            env = ActionDelayWrapper(env, delay=args.action_delay)
+            env = ActionDelayWrapper(env, delay=args.action_delay, jitter=args.action_jitter)
         if time_limit:
             # 本环境不自带步数上限(只 terminated 不 truncated);EvalCallback 的
             # evaluate_policy 没有步数预算,好策略永不撞墙会把评测永远挂住。
@@ -155,16 +158,19 @@ class ActionDelayWrapper(gym.Wrapper):
     与量化异步协议(ctl_step_ms)的固有死时间逐步同构:策略对 o_k 出的动作
     在 o_{k+1} 时刻应用、o_{k+2} 才可见(s_k = post-a_{k-2})。
     队初的 None 执行零动作(sim 复位后控制即零)。注意与 StickyActionWrapper
-    的区别:后者是"保持并丢弃"奇数步动作,不是延迟——本类才是延迟语义。"""
+    的区别:后者是"保持并丢弃"奇数步动作,不是延迟——本类才是延迟语义。
+    jitter>0(域随机):每步从最近 jitter 个已入队动作里均匀随机执行一个,
+    覆盖真实异步的时钟抖动与控制丢帧(动作偶发被重复执行或跳过)。"""
 
-    def __init__(self, env, delay=1):
+    def __init__(self, env, delay=1, jitter=0):
         super().__init__(env)
         self.delay = delay
+        self.jitter = jitter
         self._buf = None
 
     def _fresh(self):
         import collections
-        self._buf = collections.deque([None] * self.delay, maxlen=self.delay)
+        self._buf = collections.deque([None] * self.delay, maxlen=self.delay + (self.jitter or 0))
 
     def reset(self, **kwargs):
         self._fresh()
@@ -173,8 +179,13 @@ class ActionDelayWrapper(gym.Wrapper):
     def step(self, action):
         if self._buf is None:
             self._fresh()
-        old = self._buf.popleft()
         self._buf.append(action)
+        if self.jitter and len(self._buf) > 1:
+            k = min(self.jitter, len(self._buf) - 1)
+            idx = int(self.env.unwrapped.np_random.integers(0, k))
+            old = list(self._buf)[-2 - idx]  # 延迟 1..jitter(不含 0,贴近真实协议)
+        else:
+            old = self._buf[0]
         if old is None:
             old = np.zeros_like(action)
         return self.env.step(old)
