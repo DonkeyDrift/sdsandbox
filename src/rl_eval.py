@@ -38,6 +38,35 @@ LEVEL_TO_ENV = {
 }
 
 
+class MergeStack(gym.Wrapper):
+    """FrameStackObservation 对 channel-last 环境产出 (N,H,W,C) 引导维堆叠;
+    每帧 HWC→CHW 转置后沿通道合并为 (N*C,H,W),与训练侧
+    VecFrameStack(VecTransposeImage,channels_order='first') 同形。
+    帧序:VecFrameStack 旧帧在前、新帧在最后(新帧=通道 9-11);
+    FrameStackObservation 的 obs[0]=最旧,合并后同样新帧在 9-11,两
+    侧天然对齐(探针显式断言)。"""
+
+    def __init__(self, env):
+        super().__init__(env)
+        n, h, w, c = env.observation_space.shape  # channel-last!
+        self._n = n
+        self.observation_space = gym.spaces.Box(
+            low=env.observation_space.low.min(),
+            high=env.observation_space.high.max(),
+            shape=(n * c, h, w), dtype=env.observation_space.dtype)
+
+    def _merge(self, obs):
+        return np.concatenate([obs[i].transpose(2, 0, 1) for i in range(self._n)], axis=0)
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        return self._merge(obs), info
+
+    def step(self, action):
+        obs, r, term, trunc, info = self.env.step(action)
+        return self._merge(obs), r, term, trunc, info
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a trained PPO policy against DonkeySim")
     parser.add_argument("--model", default="outputs/rl_ppo.zip", help="模型路径")
@@ -103,33 +132,7 @@ def main():
     env = gym.make(env_id, conf=conf)
     if args.frame_stack > 0:
         from gymnasium.wrappers import FrameStackObservation
-
-        class _MergeStack(gym.Wrapper):
-            """FrameStackObservation 产出 (N,C,H,W) 引导维堆叠;合并为 (N*C,H,W),
-            与训练侧 VecFrameStack(channels_order='first') 同形,供 SB3 CNN。"""
-
-            def __init__(self, env):
-                super().__init__(env)
-                import numpy as np
-                n, c, h, w = env.observation_space.shape
-                self._n = n
-                self.observation_space = gym.spaces.Box(
-                    low=env.observation_space.low.min(),
-                    high=env.observation_space.high.max(),
-                    shape=(n * c, h, w), dtype=env.observation_space.dtype)
-
-            def _merge(self, obs):
-                return np.concatenate([obs[i] for i in range(self._n)], axis=0)
-
-            def reset(self, **kwargs):
-                obs, info = self.env.reset(**kwargs)
-                return self._merge(obs), info
-
-            def step(self, action):
-                obs, r, term, trunc, info = self.env.step(action)
-                return self._merge(obs), r, term, trunc, info
-
-        env = _MergeStack(FrameStackObservation(env, stack_size=args.frame_stack))
+        env = MergeStack(FrameStackObservation(env, stack_size=args.frame_stack))
         print("[rl_eval] 视觉叠帧 x%d(合并通道)" % args.frame_stack)
     try:
         model = PPO.load(args.model)

@@ -296,8 +296,11 @@ def main():
     if args.frame_stack > 0:
         if args.state_obs:
             raise SystemExit("--frame-stack 仅视觉观测适用")
-        from stable_baselines3.common.vec_env import VecFrameStack
-        envs = VecFrameStack(envs, n_stack=args.frame_stack, channels_order="first")
+        from stable_baselines3.common.vec_env import VecFrameStack, VecTransposeImage
+        # 环境原始观测是 channel-last (H,W,C=3):必须先 VecTransposeImage 成 CHW,
+        # 再 VecFrameStack(channels_order='first') 才会沿通道拼出 (3N,H,W);
+        # 直接叠帧会沿高度拼成 (N*H,W,3),被 SB3 误判为 3 通道长图(2026-10-19 踩过)。
+        envs = VecFrameStack(VecTransposeImage(envs), n_stack=args.frame_stack, channels_order="first")
         print("[rl_train] 视觉叠帧 x%d,观测 (3x%d,120,160)——从头训(与单帧模型通道不兼容)" % (
             args.frame_stack, args.frame_stack))
 
@@ -337,8 +340,8 @@ def main():
                                   for _ in range(args.eval_envs)])
         eval_env = VecMonitor(eval_env)
         if args.frame_stack > 0:
-            from stable_baselines3.common.vec_env import VecFrameStack
-            eval_env = VecFrameStack(eval_env, n_stack=args.frame_stack, channels_order="first")
+            from stable_baselines3.common.vec_env import VecFrameStack, VecTransposeImage
+            eval_env = VecFrameStack(VecTransposeImage(eval_env), n_stack=args.frame_stack, channels_order="first")
         callbacks.append(EvalCallback(
             eval_env, best_model_save_path="outputs/rl_best_%s/" % args.run_name,
             log_path="outputs/rl_best_%s/" % args.run_name,
