@@ -10,6 +10,7 @@
 """
 
 import argparse
+import os
 
 import numpy as np
 import gymnasium as gym
@@ -176,7 +177,13 @@ def parse_args():
                         help="场景名(Phase4 多场景零样本):%s" % ",".join(sorted(LEVEL_TO_ENV)))
     parser.add_argument("--record", default=None,
                         help="现场录帧目录(如 outputs/rl_replay_8000):每局结束导出末 N 帧+蒙太奇+meta.json,"
-                             "供赛后逐帧复核死因;状态量观测时强制 img_enc=JPG(渲染+编码,评测略慢)")
+                             "供赛后逐帧复核死因;状态量观测时强制 img_enc=JPG(渲染+编码,评测略慢);"
+                             "同时启用自动防停车检测(末 16 帧相邻灰度 L1 帧差)")
+    parser.add_argument("--progress-gate", type=float, default=1.0,
+                        help="进展门(防停车伪存活):单局 mean_speed 低于此值判 parked/fail,不计入平均"
+                             "(真司机标定的 ~50%,见 journal)")
+    parser.add_argument("--park-epsilon", type=float, default=2.0,
+                        help="自动防停车:--record 末 16 帧相邻灰度 L1 均值差 < 此值判 parked(标定值)")
     parser.add_argument("--record-frames", type=int, default=24, help="每局保留的末尾帧数(默认 24)")
     return parser.parse_args()
 
@@ -228,11 +235,23 @@ def main():
         model = SAC.load(args.model)
         print("[rl_eval] SAC 模型已加载")
 
+    def detect_park(rec_dir, eps):
+        """末 16 帧相邻灰度 L1 均值差——停车 ≈ JPEG 噪声(≈0-2),真驾驶 ≫。"""
+        import glob
+        frames = sorted(glob.glob(os.path.join(rec_dir, "frames", "f_*.jpg")))
+        if len(frames) < 4:
+            return None
+        from PIL import Image
+        gs = [np.asarray(Image.open(f).convert("L"), dtype=np.int16) for f in frames[-16:]]
+        d = [float(np.abs(gs[i + 1] - gs[i]).mean()) for i in range(len(gs) - 1)]
+        return sum(d) / len(d)
+
     results = []
+    parked_eps = 0
     for ep in range(args.episodes):
         ep_seed = (args.seed_base + ep) if args.seed_base is not None else (args.seed + ep)
         obs, _ = env.reset(seed=ep_seed)
-        total, steps, reason = 0.0, 0, "max_steps"
+        total, steps, reason, spd_sum = 0.0, 0, "max_steps", 0.0
         while steps < args.max_steps:
             action, _ = model.predict(obs, deterministic=True)
             for _ in range(args.action_repeat):
@@ -241,6 +260,7 @@ def main():
                 obs, reward, terminated, truncated, info = env.step(action)
                 total += reward
                 steps += 1
+                spd_sum += float(info.get("speed", 0.0))
                 if terminated or truncated:
                     break
             if terminated:
@@ -251,31 +271,50 @@ def main():
             if truncated:
                 reason = "truncated"
                 break
-        results.append((total, steps, reason, info.get("lap", 0)))
-        print("[rl_eval] ep%d (seed=%d): reward=%.1f steps=%d -> %s" % (ep, ep_seed, total, steps, reason))
+        mean_speed = spd_sum / max(steps, 1)
+        rec_dir = None
         if args.record:
             rec_dir = env.save_episode(ep, ep_seed, {
                 "model": args.model, "level": args.level, "sync_mode": args.sync_mode,
                 "ctl_step": args.ctl_step, "frame_stack": args.frame_stack,
                 "state_obs": args.state_obs, "reward": round(total, 1), "steps": steps,
-                "reason": reason, "lap": info.get("lap", 0),
+                "reason": reason, "lap": info.get("lap", 0), "mean_speed": round(mean_speed, 3),
             })
-            print("[rl_eval] 现场 -> %s" % rec_dir)
+        parked = mean_speed < args.progress_gate
+        frame_diff = detect_park(rec_dir, args.park_epsilon) if rec_dir else None
+        if frame_diff is not None and frame_diff < args.park_epsilon:
+            parked = True
+        results.append((total, steps, reason, info.get("lap", 0), mean_speed, parked))
+        tag = " PARKED(fail)" if parked else ""
+        print("[rl_eval] ep%d (seed=%d): reward=%.1f steps=%d mean_speed=%.2f%s -> %s"
+              % (ep, ep_seed, total, steps, mean_speed, tag, reason))
+        if rec_dir:
+            print("[rl_eval] 现场 -> %s%s" % (rec_dir, " 帧差=%.2f" % frame_diff if frame_diff is not None else ""))
+        if parked:
+            parked_eps += 1
 
     env.close()
-    avg_r = sum(r[0] for r in results) / len(results)
-    avg_l = sum(r[1] for r in results) / len(results)
-    crashed = sum(1 for r in results if r[2].startswith("terminated"))
-    laps = sum(r[3] for r in results)
-    print("[rl_eval] 平均 reward=%.1f 平均步数=%.0f (1 步=%.2fs 仿真)" %
-          (avg_r, avg_l, args.time_step if args.sync_mode else 0.05))
+    valid = [r for r in results if not r[5]]
+    avg_r = sum(r[0] for r in valid) / max(len(valid), 1)
+    avg_l = sum(r[1] for r in valid) / max(len(valid), 1)
+    avg_s = sum(r[4] for r in valid) / max(len(valid), 1)
+    crashed = sum(1 for r in valid if r[2].startswith("terminated"))
+    laps = sum(r[3] for r in valid)
+    print("[rl_eval] 有效局 %d/%d(parked 剔除 %d) 平均 reward=%.1f 平均步数=%.0f 平均速度=%.2f"
+          % (len(valid), len(results), parked_eps, avg_r, avg_l, avg_s))
     if args.json:
         import json as _json
         print("RL_EVAL_JSON " + _json.dumps({
-            "episodes": len(results), "avg_reward": round(avg_r, 1),
-            "avg_steps": round(avg_l, 1), "crash_episodes": crashed,
-            "crash_rate": round(crashed / len(results), 3), "laps": laps,
+            "episodes": len(results), "valid_episodes": len(valid),
+            "parked_episodes": parked_eps,
+            "avg_reward": round(avg_r, 1), "avg_steps": round(avg_l, 1),
+            "mean_speed": round(avg_s, 3),
+            "progress_gate": args.progress_gate, "park_epsilon": args.park_epsilon,
+            "crash_episodes": crashed,
+            "crash_rate": round(crashed / max(len(valid), 1), 3), "laps": laps,
             "max_steps": args.max_steps,
+            "per_episode": [{"reward": round(r[0], 1), "steps": r[1], "mean_speed": round(r[4], 3),
+                             "parked": r[5], "reason": r[2][:40]} for r in results],
             "seeds": (list(range(args.seed_base, args.seed_base + args.episodes))
                       if args.seed_base is not None else None),
         }))
