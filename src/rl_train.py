@@ -53,6 +53,8 @@ def parse_args():
     parser.add_argument("--frame-stack", type=int, default=0,
                         help="视觉观测叠帧 N(仅 --vision):观测变 (3N,120,160),时序信息单因子;"
                              "注意与单帧模型不兼容(conv 输入通道数变),需从头训")
+    parser.add_argument("--cam-res", type=int, nargs=2, default=(120, 160),
+                        metavar=("H", "W"), help="相机分辨率(默认 120 160 兼容基线;分辨率路线用 240 320)")
     parser.add_argument("--cam-dr", dest="cam_dr", action="store_true", default=False,
                         help="相机位姿域随机化(仅 --vision):每 reset 重发 cam_config,"
                              "offset ±2cm / rot ±1°(P3 因子 2,纯客户端)")
@@ -119,7 +121,7 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
             "cam_config": {"img_enc": img_enc},
         }
         if not args.state_obs:
-            conf["cam_resolution"] = (120, 160, 3)
+            conf["cam_resolution"] = (args.cam_res[0], args.cam_res[1], 3)
             conf["headless_keep_gfx"] = True  # 视觉用 -batchmode 离屏渲染:无窗口、无遮挡休眠
         elif args.keep_gfx:
             conf["headless_keep_gfx"] = True  # 量化异步训练:主循环全速,边界遥测不依附渲染

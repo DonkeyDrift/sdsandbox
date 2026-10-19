@@ -158,6 +158,8 @@ def parse_args():
                         help="图像观测(训练的 CNN 模型)")
     parser.add_argument("--frame-stack", type=int, default=0,
                         help="视觉观测叠帧 N(需与训练一致,观测 (3N,120,160))")
+    parser.add_argument("--cam-res", type=int, nargs=2, default=(120, 160),
+                        metavar=("H", "W"), help="相机分辨率(默认 120 160;须与模型训练一致)")
     parser.add_argument("--spawn", dest="spawn", action="store_true", default=True,
                         help="随机出生(默认,与训练一致)")
     parser.add_argument("--no-spawn", dest="spawn", action="store_false", help="固定出生点")
@@ -208,7 +210,7 @@ def main():
     if args.ctl_step > 0:
         conf["ctl_step_ms"] = args.ctl_step  # 量化异步控制(相位协议)
     if not args.state_obs:
-        conf["cam_resolution"] = (120, 160, 3)
+        conf["cam_resolution"] = (args.cam_res[0], args.cam_res[1], 3)
     if args.record and args.state_obs:
         conf["cam_config"] = {"img_enc": "JPG"}  # 录帧强制有图(state 观测默认 none 会全黑)
     if args.launch_sim and (not args.state_obs or args.record):
