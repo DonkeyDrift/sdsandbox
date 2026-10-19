@@ -1,0 +1,32 @@
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9091 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+WARNING:gym_donkeycar.core.client:socket closed by peer (EOF)
+[rl_eval] 连接 127.0.0.1:9091 sync=False state_obs=True level=mountain_track
+starting DonkeyGym env
+Setting default: frame_skip 1
+Setting default: cam_resolution (120, 160, 3)
+Setting default: log_level 20
+Setting default: steer_limit 1.0
+Setting default: throttle_min 0.0
+Setting default: throttle_max 1.0
+Setting default: done_on_flip True
+Setting default: done_on_stuck True
+Setting default: stuck_time_thresh 2.5
+[rl_eval] ep0 (seed=8200): reward=3712.1 steps=2500 -> max_steps
+[rl_eval] ep1 (seed=8201): reward=257.6 steps=252 -> terminated(cte=2.51 hit=none flipped=False stuck=0.0 lap=0 pos=(1.33162522315979, 0.635208308696747, 3.37278747558594))
+[rl_eval] ep2 (seed=8202): reward=1542.8 steps=1042 -> terminated(cte=-2.51 hit=none flipped=False stuck=0.0 lap=1 pos=(-0.403001666069031, 0.522336602210999, 0.778360486030579))
+[rl_eval] ep3 (seed=8203): reward=2741.1 steps=1871 -> terminated(cte=-2.60 hit=none flipped=False stuck=0.0 lap=1 pos=(-0.30778643488884, 0.52595067024231, 0.325347453355789))
+[rl_eval] ep4 (seed=8204): reward=1405.5 steps=941 -> terminated(cte=-2.56 hit=none flipped=False stuck=0.0 lap=1 pos=(-0.300698339939117, 0.52564150094986, 0.321555644273758))
+[rl_eval] ep5 (seed=8205): reward=2682.8 steps=1787 -> terminated(cte=-2.56 hit=none flipped=False stuck=0.0 lap=1 pos=(-0.281268745660782, 0.527474999427795, 0.270705461502075))
+[rl_eval] ep6 (seed=8206): reward=3460.8 steps=2500 -> max_steps
+[rl_eval] ep7 (seed=8207): reward=0.0 steps=2500 -> max_steps
+[rl_eval] ep8 (seed=8208): reward=0.0 steps=2500 -> max_steps
+[rl_eval] ep9 (seed=8209): reward=0.0 steps=2500 -> max_steps
+[rl_eval] 平均 reward=1580.3 平均步数=1839 (1 步=0.05s 仿真)
+RL_EVAL_JSON {"episodes": 10, "avg_reward": 1580.3, "avg_steps": 1839.3, "crash_episodes": 5, "crash_rate": 0.5, "laps": 6, "max_steps": 2500, "seeds": [8200, 8201, 8202, 8203, 8204, 8205, 8206, 8207, 8208, 8209]}
