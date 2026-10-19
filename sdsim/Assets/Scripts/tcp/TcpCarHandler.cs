@@ -60,6 +60,17 @@ namespace tk
 
         bool asynchronous = true;
         float time_step = 0.1f;
+        // ---- 量化异步控制(car_config ctl_step_ms>0 且异步模式开启)----
+        // 相位协议:控制不在收包瞬间生效,缓存到物理步进网格(Time.time 对齐,
+        // fixedDeltaTime 网格天然整除)的控制边界统一应用;遥测同边界发送——
+        // 先 SendTelemetry(上一动作已完整持有一个步长的状态)再应用新动作,
+        // 与同步步进 time_step=ctl_step 的动作-观测配对逐比特同构,但物理在
+        // 边界间实时自由推进。同步训练的策略因此无需重训即可异步驾驶。
+        // 由 FixedUpdate(物理驱动,不依附渲染循环)推进边界,headless 亦精确。
+        float ctlStepSec = 0f;           // 0=关闭,保持收包即生效的旧行为
+        float nextCtlBoundary = -1f;     // 下一控制/遥测边界(Time.time)
+        bool ctlBuffered = false;        // 有未应用到轮上的控制
+        float pendSteer, pendThrottle, pendBrake;
         bool bResetCar = false;
         bool bResetToNearest = false;
         bool bExitScene = false;
@@ -470,9 +481,20 @@ namespace tk
 
                 ai_steering *= steer_to_angle;
 
-                car.RequestSteering(ai_steering);
-                car.RequestThrottle(ai_throttle);
-                car.RequestFootBrake(ai_brake);
+                if (ctlStepSec > 0f && asynchronous)
+                {
+                    // 量化模式:缓存到下一控制边界统一应用,而非收包瞬间生效
+                    pendSteer = ai_steering;
+                    pendThrottle = ai_throttle;
+                    pendBrake = ai_brake;
+                    ctlBuffered = true;
+                }
+                else
+                {
+                    car.RequestSteering(ai_steering);
+                    car.RequestThrottle(ai_throttle);
+                    car.RequestFootBrake(ai_brake);
+                }
 
                 if (!asynchronous)
                     System.Threading.Interlocked.Increment(ref pendingSteps);
@@ -594,6 +616,12 @@ namespace tk
 
             RlMode = GlobalState.rlMode || (int)NumField(json, "rl_mode", 0f) == 1;
             controlTimeoutMs = NumField(json, "control_timeout_ms", 0f);
+
+            // 量化异步控制(car_config "ctl_step_ms": 数值,毫秒;0/缺省=旧行为)
+            float ctlStepMs = NumField(json, "ctl_step_ms", 0f);
+            ctlStepSec = ctlStepMs > 0f ? Mathf.Max(ctlStepMs / 1000f, 0.02f) : 0f;
+            nextCtlBoundary = -1f;
+            ctlBuffered = false;
 
             if (json.GetField("font_size") != null)
                 font_size = int.Parse(json.GetField("font_size").str);
@@ -855,12 +883,53 @@ namespace tk
                 {
                     DoResetCar(false);
                     bResetCar = false;
+                    ctlBuffered = false; // 复位后丢弃过期缓存控制
+                    nextCtlBoundary = -1f; // 边界相位重新对齐,首个完整步长后再发遥测
                 }
 
                 if (bResetToNearest)
                 {
-                    DoResetToNearest(false);
+                    if (ctlStepSec > 0f)
+                    {
+                        // 量化模式同 SetImmediate 落定;手动 Simulate 需临时关 autoSimulation
+                        bool auto2 = Physics.autoSimulation;
+                        Physics.autoSimulation = false;
+                        DoResetToNearest(true);
+                        Physics.autoSimulation = auto2;
+                    }
+                    else
+                    {
+                        DoResetToNearest(false);
+                    }
                     bResetToNearest = false;
+                    ctlBuffered = false;
+                    nextCtlBoundary = -1f;
+                }
+
+                // 量化异步控制:物理网格边界推进(不依附渲染循环,headless 亦精确)
+                if (asynchronous && ctlStepSec > 0f)
+                {
+                    if (nextCtlBoundary < 0f)
+                        nextCtlBoundary = Time.time + ctlStepSec;
+                    while (Time.time >= nextCtlBoundary)
+                    {
+                        // 先发遥测:状态里上一动作已完整持有一个 ctlStepSec
+                        SendTelemetry();
+                        NoteSend();
+                        if (ctlBuffered)
+                        {
+                            car.RequestSteering(pendSteer);
+                            car.RequestThrottle(pendThrottle);
+                            car.RequestFootBrake(pendBrake);
+                            if (carComp0 != null)
+                                carComp0.ApplyRequests(); // 本物理步即新动作第一个子步
+                            ctlBuffered = false;
+                        }
+                        nextCtlBoundary += ctlStepSec;
+                        // 主线程长卡顿后不补发积压边界,重新对齐,防突发补帧
+                        if (Time.time - nextCtlBoundary > 8f * ctlStepSec)
+                            nextCtlBoundary = Time.time + ctlStepSec;
+                    }
                 }
 
                 if (ai_text != null)
@@ -912,8 +981,17 @@ namespace tk
                 Vector3 pos = node.pos + right * resetLateralOffset + Vector3.up * 0.4f;
                 Quaternion rot = node.rotation * Quaternion.Euler(0f, hNoise, 0f);
 
-                if (immediate)
+                // 量化异步模式:复位也要与同步逐比特一致——KeepSetting 协程不落定悬挂/
+                // 轮接触状态,高增益策略会把这点系统差放大成失稳。SetImmediate 需要手动
+                // Simulate,临时关 autoSimulation 防该帧物理双步。
+                bool quantAsync = ctlStepSec > 0f && asynchronous;
+                if (immediate || quantAsync)
+                {
+                    bool auto = Physics.autoSimulation;
+                    Physics.autoSimulation = false;
                     carComp0.SetImmediate(pos, rot, syncFixedDt, 2);
+                    Physics.autoSimulation = auto;
+                }
                 else
                 {
                     carComp0.rb.velocity = Vector3.zero;
@@ -934,11 +1012,17 @@ namespace tk
             }
             else
             {
-                if (immediate)
+                bool quantAsync2 = ctlStepSec > 0f && asynchronous;
+                if (immediate || quantAsync2)
                 {
                     Car cc = car as Car;
                     if (cc != null)
+                    {
+                        bool auto = Physics.autoSimulation;
+                        Physics.autoSimulation = false;
                         cc.SetImmediate(cc.startPos, cc.startRot, syncFixedDt, 2);
+                        Physics.autoSimulation = auto;
+                    }
                     else
                         car.RestorePosRot();
                 }
@@ -1134,6 +1218,7 @@ namespace tk
                 car.RequestSteering(0.0f);
                 car.RequestThrottle(0.0f);
                 car.RequestFootBrake(1.0f);
+                ctlBuffered = false; // deadman 为安全旁路,立即生效并清缓存
                 deadmanTriggered = true;
             }
 
@@ -1142,13 +1227,18 @@ namespace tk
             if (camSensorB != null)
                 camSensorB.Tick();
 
-            float effFps = GlobalState.telemetry_fps > 0f ? GlobalState.telemetry_fps : limitFPS;
-            timeSinceLastCapture += Time.deltaTime;
-            if (timeSinceLastCapture >= 1.0f / effFps)
+            if (!(ctlStepSec > 0f))
             {
-                timeSinceLastCapture -= (1.0f / effFps);
-                SendTelemetry();
-                NoteSend();
+                // 非量化模式:遥测节流在渲染循环(旧行为);量化模式的遥测由
+                // FixedUpdate 的物理网格边界驱动,与渲染完全解耦。
+                float effFps = GlobalState.telemetry_fps > 0f ? GlobalState.telemetry_fps : limitFPS;
+                timeSinceLastCapture += Time.deltaTime;
+                if (timeSinceLastCapture >= 1.0f / effFps)
+                {
+                    timeSinceLastCapture -= (1.0f / effFps);
+                    SendTelemetry();
+                    NoteSend();
+                }
             }
 
             TelemetryStats();

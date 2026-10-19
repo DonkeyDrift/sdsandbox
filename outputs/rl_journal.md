@@ -605,3 +605,36 @@ ONNX 导出此前已验证(champion2.onnx 数值一致)。Phase 4 剩余:最终�
   与收官总结口径一致。champion2 维持冠军,不更替。
 - **全目标收尾**:Phase 0 ✅ / 1 ⚠️(原生口径满分,严格门固有限制)/ 2 ❌(架构级)/
   3 ❌(天花板~900步)/ 4 ✅。所有产物、证据、日志已提交(f32847f 及之后)。
+
+## 2026-10-19 09:00 授权新范围:sim 异步架构重设计(遥测定时器驱动+相位协议)
+
+### 协议实现(car_config `ctl_step_ms`,commit 随后)
+
+- **量化异步控制**:控制不在收包瞬间生效,缓存到物理步进网格(Time.time 对齐
+  0.01 固定步长)的控制边界统一应用;遥测同边界先发(上一动作完整持有一个步长的
+  状态)再应用新动作;由 FixedUpdate 驱动——**不依附渲染循环**,遥测节拍实测
+  mean=50.0ms std=0.9ms(旧异步跟随渲染帧,相位漂移)。
+- **复位逐比特化**:量化模式异步复位走 SetImmediate(与同步一致),KeepSetting
+  协程不落定悬挂/轮接触状态会被高增益策略放大;手动 Simulate 临时关
+  autoSimulation 防双步。DoResetToNearest 同处理。
+- **客户端**:fork send_car_config 透传 ctl_step_ms;rl_eval/rl_train 加 --ctl-step;
+  rl_train 加 --keep-gfx(-batchmode 离屏渲染,主循环全速——**headless nographics
+  下主循环仅 ~3.3fps,实时物理跑成 1/3 速**,keep_gfx 实测 18-25Hz,视觉轨老经验复用)。
+- **headless 异步 1fps 之谜告破**:根因是主循环帧率(无渲染时 ~3.3fps)而非
+  "依附相机渲染";keep_gfx 即解。
+
+### 调试链(全部实测)
+
+1. champion2 量化异步验收 **38.7 步全崩**——协议生效但策略失稳。
+2. 恒定动作 A/B:两模式轨迹逐点一致 → 机制正确,差异必在闭环。
+3. 闭环 A/B:量化异步 cte 发散更快 → 定位**协议固有死时间**:动作在边界后应用,
+   s_k = post-a_{k-2}(动作计算到可见隔 2 帧),同步模式思考期世界冻结无此死时间。
+4. **异步训练本身有诡异的 4env/2env 死锁**(worker 空转、main 阻塞在管道读,
+   单 env 探针正常;根因未定位,记后续用 py-spy root 查)——弃异步训练路线。
+5. **等价转换**:ActionDelayWrapper(真·执行 N 步前动作)在同步模式内精确建模
+   协议死时间(逐索引验证 s_k = post-a_{k-2} 同构)。踩坑:first 版 StickyActionWrapper
+   是"保持并丢弃"奇数步动作,**不是延迟**(异步微调零迁移的早年结论也受此污染);
+   --action-delay 1 才是真延迟。同步 400 步/s,训练成本骤降两个数量级。
+6. delay1b(champion2 + action-delay 1,lr 1e-4):300k 步 ep_len 52→74 缓升,
+   续训 700k 中。完成后量化异步验收(门 avg>=1200/crash<=20%,基线:champion2
+   量化异步 38.7 步全崩)。

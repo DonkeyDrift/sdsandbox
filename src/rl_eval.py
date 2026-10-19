@@ -62,6 +62,9 @@ def parse_args():
                         help="每个动作连续保持 N 个环境步:异步模式对齐训练的 0.05s 动作时长语义")
     parser.add_argument("--cam-fps", type=float, default=0.0,
                         help="异步评测遥测/控制频率(Hz,0=默认20):60Hz 连续控制可消除冠军的高增益失稳")
+    parser.add_argument("--ctl-step", type=int, default=0,
+                        help="量化异步控制步长(毫秒,相位协议):>0 时控制应用/遥测对齐物理网格边界,"
+                             "动作-观测配对与同步 time_step 同构——同步冠军无需重训即可异步驾驶")
     parser.add_argument("--level", default="mountain_track",
                         help="场景名(Phase4 多场景零样本):%s" % ",".join(sorted(LEVEL_TO_ENV)))
     return parser.parse_args()
@@ -84,6 +87,8 @@ def main():
         "start_delay": 3.0,
         "sim_args": ["--rl"],
     }
+    if args.ctl_step > 0:
+        conf["ctl_step_ms"] = args.ctl_step  # 量化异步控制(相位协议)
     if not args.state_obs:
         conf["cam_resolution"] = (120, 160, 3)
 

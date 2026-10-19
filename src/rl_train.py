@@ -12,6 +12,7 @@
 import argparse
 import os
 
+import numpy as np
 import gymnasium as gym
 import gym_donkeycar  # noqa: F401 注册 donkey-* env
 from stable_baselines3 import PPO, SAC
@@ -57,11 +58,19 @@ def parse_args():
     parser.add_argument("--spawn-node-max", type=int, default=245, help="出生节点范围上限")
     parser.add_argument("--cam-fps", type=float, default=0.0,
                         help="异步训练遥测/控制频率(Hz,0=默认20):异步鲁棒微调用 40")
+    parser.add_argument("--ctl-step", type=int, default=0,
+                        help="量化异步控制步长(毫秒,相位协议):>0 时控制应用/遥测对齐物理网格边界,"
+                             "动作-观测配对与同步 time_step 同构(异步训练配 --async-mode 用)")
+    parser.add_argument("--keep-gfx", dest="keep_gfx", action="store_true", default=False,
+                        help="异步状态量训练用 -batchmode 离屏渲染(不弹窗但主循环全速,量化遥测需要;headless 下异步流可能 ~1fps)")
     parser.add_argument("--max-cte", type=float, default=2.5, help="出界 cross-track 误差阈值")
     parser.add_argument("--action-hold-prob", type=float, default=0.0,
                         help="控制延迟课程:每步以该概率保持上一动作(异步相位差模拟,Phase2 用 0.3)")
     parser.add_argument("--action-hold-max", type=int, default=2,
                         help="控制延迟课程:单次最多连续保持 1..N 个物理步")
+    parser.add_argument("--action-delay", type=int, default=0,
+                        help="真·动作延迟(步):执行 N 步之前的动作,当前动作入队——精确模拟量化异步协议 "
+                             "(ctl_step_ms)的固有死时间;1 = 延迟一步(与 --ctl-step 50 协议等价)")
     parser.add_argument("--seed", type=int, default=1, help="训练/出生随机种子")
     parser.add_argument("--save", default=None, help="最终模型保存路径(默认 outputs/rl_<algo>.zip)")
     parser.add_argument("--tb", default="outputs/rl_tb", help="tensorboard 日志目录")
@@ -91,12 +100,18 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
         if not args.state_obs:
             conf["cam_resolution"] = (120, 160, 3)
             conf["headless_keep_gfx"] = True  # 视觉用 -batchmode 离屏渲染:无窗口、无遮挡休眠
+        elif args.keep_gfx:
+            conf["headless_keep_gfx"] = True  # 量化异步训练:主循环全速,边界遥测不依附渲染
         if args.cam_fps > 0:
             conf["cam_config"]["fps"] = args.cam_fps  # 数值型:fork 有 fps>0 数值比较
+        if args.ctl_step > 0:
+            conf["ctl_step_ms"] = args.ctl_step  # 量化异步控制(相位协议)
         env = gym.make("donkey-mountain-track-v0", conf=conf)
         if args.action_hold_prob > 0:
             env = StickyActionWrapper(env, hold_prob=args.action_hold_prob,
                                       hold_max=args.action_hold_max)
+        if args.action_delay > 0:
+            env = ActionDelayWrapper(env, delay=args.action_delay)
         if time_limit:
             # 本环境不自带步数上限(只 terminated 不 truncated);EvalCallback 的
             # evaluate_policy 没有步数预算,好策略永不撞墙会把评测永远挂住。
@@ -133,6 +148,36 @@ class StickyActionWrapper(gym.Wrapper):
             if self.env.unwrapped.np_random.random() < self.hold_prob:
                 self._hold_remaining = int(self.env.unwrapped.np_random.integers(1, self.hold_max + 1))
         return self.env.step(action)
+
+
+class ActionDelayWrapper(gym.Wrapper):
+    """真·动作延迟:执行 N 步之前收到的动作,当前动作入队(先进先出)。
+    与量化异步协议(ctl_step_ms)的固有死时间逐步同构:策略对 o_k 出的动作
+    在 o_{k+1} 时刻应用、o_{k+2} 才可见(s_k = post-a_{k-2})。
+    队初的 None 执行零动作(sim 复位后控制即零)。注意与 StickyActionWrapper
+    的区别:后者是"保持并丢弃"奇数步动作,不是延迟——本类才是延迟语义。"""
+
+    def __init__(self, env, delay=1):
+        super().__init__(env)
+        self.delay = delay
+        self._buf = None
+
+    def _fresh(self):
+        import collections
+        self._buf = collections.deque([None] * self.delay, maxlen=self.delay)
+
+    def reset(self, **kwargs):
+        self._fresh()
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        if self._buf is None:
+            self._fresh()
+        old = self._buf.popleft()
+        self._buf.append(action)
+        if old is None:
+            old = np.zeros_like(action)
+        return self.env.step(old)
 
 
 def _close_vec_env(env):
