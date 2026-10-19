@@ -54,8 +54,11 @@ def parse_args():
                         help="视觉观测叠帧 N(仅 --vision):观测变 (3N,120,160),时序信息单因子;"
                              "注意与单帧模型不兼容(conv 输入通道数变),需从头训")
     parser.add_argument("--cam-dr", dest="cam_dr", action="store_true", default=False,
-                        help="相机位姿域随机化(仅 --vision):每 reset 重发 cam_config," 
+                        help="相机位姿域随机化(仅 --vision):每 reset 重发 cam_config,"
                              "offset ±2cm / rot ±1°(P3 因子 2,纯客户端)")
+    parser.add_argument("--crash-penalty", type=float, default=0.0,
+                        help="非截断终止统一扣固定奖励(默认 0=旧行为,保护状态量基线;"
+                             "P3 叠帧重试用 50)")
     parser.add_argument("--img-enc", default="none", help="无图像观测时的 cam_config img_enc(默认 none)")
     parser.add_argument("--time-step", type=float, default=0.05, help="同步步进步长(秒)")
     parser.add_argument("--spawn", dest="spawn", action="store_true", default=True, help="随机出生到赛道节点(默认)")
@@ -119,6 +122,8 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
             conf["cam_config"]["fps"] = args.cam_fps  # 数值型:fork 有 fps>0 数值比较
         if args.ctl_step > 0:
             conf["ctl_step_ms"] = args.ctl_step  # 量化异步控制(相位协议)
+        if args.crash_penalty > 0:
+            conf["crash_penalty"] = args.crash_penalty  # 非截断终止统一扣分(默认关)
         env = gym.make("donkey-mountain-track-v0", conf=conf)
         if args.cam_dr:
             if args.state_obs:
