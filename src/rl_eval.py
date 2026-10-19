@@ -11,6 +11,7 @@
 
 import argparse
 
+import numpy as np
 import gymnasium as gym
 import gym_donkeycar  # noqa: F401 注册 donkey-* env
 from stable_baselines3 import PPO
@@ -102,8 +103,34 @@ def main():
     env = gym.make(env_id, conf=conf)
     if args.frame_stack > 0:
         from gymnasium.wrappers import FrameStackObservation
-        env = FrameStackObservation(env, stack_size=args.frame_stack, channel_order="first")
-        print("[rl_eval] 视觉叠帧 x%d" % args.frame_stack)
+
+        class _MergeStack(gym.Wrapper):
+            """FrameStackObservation 产出 (N,C,H,W) 引导维堆叠;合并为 (N*C,H,W),
+            与训练侧 VecFrameStack(channels_order='first') 同形,供 SB3 CNN。"""
+
+            def __init__(self, env):
+                super().__init__(env)
+                import numpy as np
+                n, c, h, w = env.observation_space.shape
+                self._n = n
+                self.observation_space = gym.spaces.Box(
+                    low=env.observation_space.low.min(),
+                    high=env.observation_space.high.max(),
+                    shape=(n * c, h, w), dtype=env.observation_space.dtype)
+
+            def _merge(self, obs):
+                return np.concatenate([obs[i] for i in range(self._n)], axis=0)
+
+            def reset(self, **kwargs):
+                obs, info = self.env.reset(**kwargs)
+                return self._merge(obs), info
+
+            def step(self, action):
+                obs, r, term, trunc, info = self.env.step(action)
+                return self._merge(obs), r, term, trunc, info
+
+        env = _MergeStack(FrameStackObservation(env, stack_size=args.frame_stack))
+        print("[rl_eval] 视觉叠帧 x%d(合并通道)" % args.frame_stack)
     try:
         model = PPO.load(args.model)
     except Exception:
