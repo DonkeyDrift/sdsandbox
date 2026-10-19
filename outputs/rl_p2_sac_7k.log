@@ -1,0 +1,66 @@
+[UnityMemory] Configuration Parameters - Can be set up in boot.config
+    "memorysetup-bucket-allocator-granularity=16"
+    "memorysetup-bucket-allocator-bucket-count=8"
+    "memorysetup-bucket-allocator-block-size=4194304"
+    "memorysetup-bucket-allocator-block-count=1"
+    "memorysetup-main-allocator-block-size=16777216"
+    "memorysetup-thread-allocator-block-size=16777216"
+    "memorysetup-gfx-main-allocator-block-size=16777216"
+    "memorysetup-gfx-thread-allocator-block-size=16777216"
+    "memorysetup-cache-allocator-block-size=4194304"
+    "memorysetup-typetree-allocator-block-size=2097152"
+    "memorysetup-profiler-bucket-allocator-granularity=16"
+    "memorysetup-profiler-bucket-allocator-bucket-count=8"
+    "memorysetup-profiler-bucket-allocator-block-size=4194304"
+    "memorysetup-profiler-bucket-allocator-block-count=1"
+    "memorysetup-profiler-allocator-block-size=16777216"
+    "memorysetup-profiler-editor-allocator-block-size=1048576"
+    "memorysetup-temp-allocator-size-main=4194304"
+    "memorysetup-job-temp-allocator-block-size=2097152"
+    "memorysetup-job-temp-allocator-block-size-background=1048576"
+    "memorysetup-job-temp-allocator-reduction-small-platforms=262144"
+    "memorysetup-allocator-temp-initial-block-size-main=262144"
+    "memorysetup-allocator-temp-initial-block-size-worker=262144"
+    "memorysetup-temp-allocator-size-background-worker=32768"
+    "memorysetup-temp-allocator-size-job-worker=262144"
+    "memorysetup-temp-allocator-size-preload-manager=262144"
+    "memorysetup-temp-allocator-size-nav-mesh-worker=65536"
+    "memorysetup-temp-allocator-size-audio-worker=65536"
+    "memorysetup-temp-allocator-size-cloud-worker=32768"
+    "memorysetup-temp-allocator-size-gfx=262144"
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9302 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+INFO:gym_donkeycar.envs.donkey_sim:synchronous step mode enabled, time_step=0.05
+[rl_eval] 连接 127.0.0.1:9302 sync=True state_obs=True level=mountain_track
+starting DonkeyGym env
+Setting default: frame_skip 1
+Setting default: cam_resolution (120, 160, 3)
+Setting default: log_level 20
+Setting default: steer_limit 1.0
+Setting default: throttle_min 0.0
+Setting default: throttle_max 1.0
+Setting default: done_on_flip True
+Setting default: done_on_stuck True
+Setting default: stuck_time_thresh 2.5
+donkey subprocess started
+[rl_eval] SAC 模型已加载
+[rl_eval] ep0 (seed=7100): reward=10.6 steps=593 -> terminated(cte=-2.51 hit=none flipped=False stuck=0.0 lap=0 pos=(7.23629474639893, 0.886471390724182, 10.0843906402588))
+[rl_eval] ep1 (seed=7101): reward=11.8 steps=41 -> terminated(cte=-2.60 hit=none flipped=False stuck=0.0 lap=0 pos=(-2.79312324523926, 0.765888035297394, 2.56561851501465))
+[rl_eval] ep2 (seed=7102): reward=5.3 steps=41 -> terminated(cte=-2.62 hit=none flipped=False stuck=0.0 lap=0 pos=(7.04644203186035, 0.717096149921417, 7.4384822845459))
+[rl_eval] ep3 (seed=7103): reward=0.8 steps=3000 -> max_steps
+[rl_eval] ep4 (seed=7104): reward=13.1 steps=25 -> terminated(cte=2.63 hit=none flipped=False stuck=0.0 lap=0 pos=(6.45287418365479, 0.697169780731201, 1.58778405189514))
+[rl_eval] ep5 (seed=7105): reward=-22.6 steps=2334 -> terminated(cte=2.61 hit=none flipped=False stuck=0.0 lap=0 pos=(-6.77209377288818, 0.684006094932556, 2.98827886581421))
+[rl_eval] ep6 (seed=7106): reward=662.0 steps=727 -> terminated(cte=-2.55 hit=none flipped=False stuck=0.0 lap=0 pos=(-2.8675057888031, 0.692107260227203, 13.8189764022827))
+[rl_eval] ep7 (seed=7107): reward=209.0 steps=206 -> terminated(cte=-2.80 hit=none flipped=False stuck=0.0 lap=0 pos=(1.02951908111572, 0.471555948257446, 13.1284599304199))
+[rl_eval] ep8 (seed=7108): reward=701.1 steps=700 -> terminated(cte=-2.71 hit=none flipped=False stuck=0.0 lap=0 pos=(2.28926801681519, 0.549887657165527, 13.0900411605835))
+[rl_eval] ep9 (seed=7109): reward=166.2 steps=164 -> terminated(cte=-2.60 hit=none flipped=False stuck=0.0 lap=0 pos=(2.3695809841156, 0.553026378154755, 13.0673217773438))
+[rl_eval] ep10 (seed=7110): reward=574.6 steps=632 -> terminated(cte=-2.92 hit=none flipped=False stuck=0.0 lap=0 pos=(-2.40889143943787, 0.669145941734314, 13.8452310562134))
+closing donkey sim subprocess
+[rl_eval] 平均 reward=212.0 平均步数=769 (1 步=0.05s 仿真)
+RL_EVAL_JSON {"episodes": 11, "avg_reward": 212.0, "avg_steps": 769.4, "crash_episodes": 10, "crash_rate": 0.909, "laps": 0, "max_steps": 3000, "seeds": [7100, 7101, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7109, 7110]}

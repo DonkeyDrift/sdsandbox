@@ -708,3 +708,30 @@ ONNX 导出此前已验证(champion2.onnx 数值一致)。Phase 4 剩余:最终�
   crash<=20% ❌(全候选 50-100%)。总训练量 ~2.4M 步,精修/阶梯均无收敛迹象。
 - 架构交付不变:量化相位协议 + keep-gfx 主循环修复 + delay/jitter 等价训练 +
   双模策略(halloffame)。crash 瓶颈=延迟抖动下的弯道极限精度,继续堆里程边际收益尽。
+
+## 2026-10-19 三轨新目标 · P2 落定(SAC 热启动证伪,证据链完整)
+
+### 手术(成功)
+- `src/sac_transplant.py`:PPO champion2 → SAC(net_arch [64,64]) 热启动移植。
+  trunk 直拷;mu 头初值=PPO action_net;**校验集用真实驾驶观测**(headless 同步 sim
+  跑 PPO 采集 1500 条——高斯伪观测在保留维/相关性上有 OOD,逐点校验必用真流形);
+  岭回归 warm-start + torch Adam 动作空间精修(huber+弱锚定)。**最终口径:
+  mean|Δ|=0.0412,p95=0.1281,max=0.3565**(max 在 PPO 决策边界的不可约误差,
+  热启动价值由 mean/p95 决定)。产物 rl_sac_seeded.zip(commit c1c403c)。
+
+### 训练+验收(证伪)
+- 课程:node 15-105 + lateral 2.2/heading 15;--freeze-actor-steps 5000(critic
+  冷启动保护,ActorUnfreezeCallback 到点解冻)+ lr 1e-4,100k 步。
+- 验收(同步,2500/3000 步):**8000 域 final crash 18/20、best 19/20;7100 域
+  crash 10/11**——全面劣化(PPO champion2 同域 2/20、7100 11/11)。
+- **机制判定**:移植手术本身达标,但 SAC 微调(冷 critic+5 万缓冲+熵项)在数万步内
+  把 actor 拖离移植流形;eval-best 快照同样崩(选择压力来自难课程,不保护通用性)。
+- **P2 定论**:出生边界门在已试算法族内(PPO 泛化/加强课程/带内钻练 + SAC 热启动)
+  全部证伪;按既定口径停止换算法路线。证据:outputs/rl_p2_sac_{8k,7k}.log。
+
+### P1 中场(同轮)
+- 钳位 0.01 交付(smoke 24/24,ctl-step 10 遥测节拍 mean 10.0ms std 3.5)。
+- delay10j(jitter=3 @10ms)500k 训练 sync ep_len 2180 饱和,但量化异步验收反劣:
+  final 873/crash10、best 754/crash10(20ms 版 1044-1816)。客户端步周期实测
+  mean 10.0/p95 17.2/23% 超界——100Hz 下客户端(python MLP+fork)成新瓶颈。
+- 相对口径 jitter=6 标定跑(delay10j6)进行中;落定后出三因子消融总表。
