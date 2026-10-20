@@ -1,0 +1,28 @@
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9091 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+INFO:gym_donkeycar.envs.donkey_sim:done sending cam config. {'img_enc': 'JPG', 'img_w': 160, 'img_h': 120}
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/utils.py:573: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:209.)
+  return th.as_tensor(obs, device=device)
+[rl_eval] 连接 127.0.0.1:9091 sync=False state_obs=False level=mountain_track
+starting DonkeyGym env
+Setting default: frame_skip 1
+Setting default: log_level 20
+Setting default: steer_limit 1.0
+Setting default: throttle_min 0.0
+Setting default: throttle_max 1.0
+Setting default: done_on_flip True
+Setting default: done_on_stuck True
+Setting default: stuck_time_thresh 2.5
+[rl_eval] 现场录帧开启 -> outputs/rec_bc_canary (每局末 24 帧)
+[rl_eval] ep0 (seed=8200): reward=-7.9 steps=191 mean_speed=0.37 PARKED(fail) -> terminated(cte=2.65 hit=none flipped=False stuck=0.0 lap=0 pos=(-8.1431713104248, 0.684541344642639, 6.51930379867554))
+[rl_eval] 现场 -> outputs/rec_bc_canary/ep00_seed8200_crash 帧差=15.14
+[rl_eval] ep1 (seed=8201): reward=30.8 steps=286 mean_speed=0.30 PARKED(fail) -> terminated(cte=2.55 hit=none flipped=False stuck=0.0 lap=0 pos=(1.71001267433167, 0.577069163322449, -0.641499698162079))
+[rl_eval] 现场 -> outputs/rec_bc_canary/ep01_seed8201_crash 帧差=20.31
+[rl_eval] 有效局 0/2(parked 剔除 2) 平均 reward=0.0 平均步数=0 平均速度=0.00
+RL_EVAL_JSON {"episodes": 2, "valid_episodes": 0, "parked_episodes": 2, "avg_reward": 0.0, "avg_steps": 0.0, "mean_speed": 0.0, "progress_gate": 1.0, "park_epsilon": 2.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 0, "max_steps": 2500, "per_episode": [{"reward": -7.9, "steps": 191, "mean_speed": 0.375, "parked": true, "reason": "terminated(cte=2.65 hit=none flipped=Fal"}, {"reward": 30.8, "steps": 286, "mean_speed": 0.295, "parked": true, "reason": "terminated(cte=2.55 hit=none flipped=Fal"}], "seeds": [8200, 8201]}
