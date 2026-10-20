@@ -39,6 +39,37 @@ LEVEL_TO_ENV = {
 }
 
 
+def _load_bc_cat(path):
+    """BC 分类头模型加载:action_net=ExpectDecode 无法 strict 灌入线性骨架,
+    构造骨架后挂解码头再 load_state_dict(strict=False)。"""
+    import io
+    import zipfile
+
+    import torch
+    from stable_baselines3 import PPO
+    from gym_donkeycar.envs.bc_decode import ExpectDecode
+
+    class _D(gym.Env):
+        observation_space = gym.spaces.Box(0, 255, (3, 120, 160), dtype=np.uint8)
+        action_space = gym.spaces.Box(
+            np.array([-1., 0.], dtype=np.float32), np.array([1., 1.], dtype=np.float32))
+
+        def reset(self, **k):
+            return np.zeros((3, 120, 160), np.uint8), {}
+
+        def step(self, a):
+            return np.zeros((3, 120, 160), np.uint8), 0., False, False, {}
+
+    model = PPO("CnnPolicy", _D(), verbose=0)
+    with zipfile.ZipFile(path) as z:
+        name = "policy.pth" if "policy.pth" in z.namelist() else "parameters"
+        params = torch.load(io.BytesIO(z.read(name)), map_location="cpu",
+                            weights_only=False)
+    model.policy.action_net = ExpectDecode(model.policy.features_dim)
+    model.policy.load_state_dict(params, strict=False)
+    return model
+
+
 class MergeStack(gym.Wrapper):
     """FrameStackObservation 对 channel-last 环境产出 (N,H,W,C) 引导维堆叠;
     每帧 HWC→CHW 转置后沿通道合并为 (N*C,H,W),与训练侧
@@ -234,9 +265,13 @@ def main():
     try:
         model = PPO.load(args.model)
     except Exception:
-        from stable_baselines3 import SAC
-        model = SAC.load(args.model)
-        print("[rl_eval] SAC 模型已加载")
+        try:
+            from stable_baselines3 import SAC
+            model = SAC.load(args.model)
+            print("[rl_eval] SAC 模型已加载")
+        except Exception:
+            model = _load_bc_cat(args.model)
+            print("[rl_eval] BC 分类头模型已加载(ExpectDecode)")
 
     def detect_park(rec_dir, eps):
         """末 16 帧相邻灰度 L1 均值差——停车 ≈ JPEG 噪声(≈0-2),真驾驶 ≫。"""

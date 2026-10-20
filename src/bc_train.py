@@ -51,6 +51,40 @@ class BCNet(nn.Module):
         return self.head(self.trunk(x))
 
 
+N_STEER_BIN, N_THR_BIN = 21, 6
+
+
+class BCCatNet(nn.Module):
+    """分类头 BC:共享 NatureCNN trunk,steer 21 箱/throttle 6 箱交叉熵。
+    推理解码=softmax 期望(Σ p_i·bin中心)——消 MSE 多峰平均效应(蠕行根因)。"""
+
+    def __init__(self):
+        super().__init__()
+        self.trunk = NatureCNN()
+        self.head_s = nn.Linear(512, N_STEER_BIN)
+        self.head_t = nn.Linear(512, N_THR_BIN)
+        self.register_buffer("centers_s", torch.linspace(-1.0, 1.0, N_STEER_BIN))
+        self.register_buffer("centers_t", torch.linspace(0.0, 1.0, N_THR_BIN))
+
+    def forward(self, x):
+        z = self.trunk(x)
+        return self.head_s(z), self.head_t(z)
+
+    @staticmethod
+    def to_bins(acts):
+        s = torch.round((acts[:, 0].clamp(-1, 1) + 1.0) / 2.0 * (N_STEER_BIN - 1)).long()
+        t = torch.round(acts[:, 1].clamp(0, 1) * (N_THR_BIN - 1)).long()
+        return s, t
+
+    @torch.no_grad()
+    def decode(self, x):
+        hs, ht = self.forward(x)
+        ps = torch.softmax(hs, dim=-1)
+        pt = torch.softmax(ht, dim=-1)
+        return torch.stack([(ps * self.centers_s).sum(-1),
+                            (pt * self.centers_t).sum(-1)], dim=-1)
+
+
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="outputs/bc_data")
@@ -61,6 +95,8 @@ def parse_args():
     ap.add_argument("--hard-oversample", type=float, default=0.3,
                     help="纠偏帧(|steer|>0.3)最低 batch 占比(0=关)")
     ap.add_argument("--overfit-probe", action="store_true", help="256 样本过拟合探针")
+    ap.add_argument("--head", choices=["reg", "cat"], default="cat",
+                    help="cat=分箱分类头(21 steer/6 throttle,softmax 期望解码,默认)")
     ap.add_argument("--seed", type=int, default=7)
     return ap.parse_args()
 
@@ -89,7 +125,7 @@ def split_by_episode(ep_ids, val_ratio=0.1, seed=7):
     return ~val_mask, val_mask
 
 
-def evaluate(model, imgs, acts, device, batch=512):
+def evaluate(model, imgs, acts, device, batch=512, head_cat=False):
     model.eval()
     tot_se, n = 0.0, 0
     abs_s_sum, abs_t_sum = 0.0, 0.0
@@ -98,7 +134,7 @@ def evaluate(model, imgs, acts, device, batch=512):
         for i in range(0, len(imgs), batch):
             x = torch.as_tensor(imgs[i:i + batch], dtype=torch.float32, device=device).permute(0, 3, 1, 2) / 255.0
             y = torch.as_tensor(acts[i:i + batch], dtype=torch.float32, device=device)
-            p = model(x)
+            p = model.decode(x) if head_cat else model(x)
             tot_se += float(((p - y) ** 2).sum()); n += len(x)
             abs_s_sum += float((p[:, 0] - y[:, 0]).abs().sum())
             abs_t_sum += float((p[:, 1] - y[:, 1]).abs().sum())
@@ -120,7 +156,7 @@ def main():
     tr, va = split_by_episode(ep_ids, seed=args.seed)
     print("[bc] train %d / val %d(按局段)" % (tr.sum(), va.sum()))
 
-    model = BCNet().to(device)
+    model = (BCCatNet() if args.head == "cat" else BCNet()).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     x_all = imgs[tr]
@@ -150,12 +186,17 @@ def main():
             x = x.to(device).float().permute(0, 3, 1, 2) / 255.0
             y = y.to(device).float()
             opt.zero_grad()
-            loss = nn.functional.mse_loss(model(x), y)
+            if args.head == "cat":
+                hs, ht = model(x)
+                bs, bt = BCCatNet.to_bins(y)
+                loss = nn.functional.cross_entropy(hs, bs) + nn.functional.cross_entropy(ht, bt)
+            else:
+                loss = nn.functional.mse_loss(model(x), y)
             loss.backward()
             opt.step()
             ep_loss += float(loss); nb += 1
         if ep % 5 == 4 or ep == args.epochs - 1 or args.overfit_probe:
-            v = evaluate(model, imgs[va], acts[va], device)
+            v = evaluate(model, imgs[va], acts[va], device, head_cat=(args.head == "cat"))
             print("[bc] ep%d loss=%.4f | val MSE=%.4f steerMAE=%.4f thrMAE=%.4f "
                   "hardSteerMAE=%.4f(n=%d)" % (
                       ep, ep_loss / nb, v["mse"], v["steer_mae"], v["thr_mae"],
@@ -166,7 +207,7 @@ def main():
 
     # ---- 探针门 ----
     assert not args.overfit_probe
-    v = evaluate(model, imgs[va], acts[va], device)
+    v = evaluate(model, imgs[va], acts[va], device, head_cat=(args.head == "cat"))
     print("[bc] 终验: val steerMAE=%.4f hardSteerMAE=%.4f thrMAE=%.4f(首跑标定,无先验门)" % (
         v["steer_mae"], v["hard_steer_mae"], v["thr_mae"]))
 
@@ -185,16 +226,25 @@ def main():
         def step(self, a):
             return np.zeros((3, 120, 160), np.uint8), 0., False, False, {}
 
-    ppo = PPO("CnpPolicy" if False else "CnnPolicy", Dummy(), verbose=0)
-    # 权重灌入:trunk→features_extractor(cnn+linear),head→action_net
+    ppo = PPO("CnnPolicy", Dummy(), verbose=0)
+    # trunk→features_extractor(cnn+linear)
     src = model.trunk.state_dict()
     dst = ppo.policy.features_extractor
     assert src["cnn.0.weight"].shape == dst.state_dict()["cnn.0.weight"].shape
     dst.cnn.load_state_dict({k[len("cnn."):]: v for k, v in src.items() if k.startswith("cnn.")})
     dst.linear.load_state_dict(model.trunk.linear.state_dict())
-    with torch.no_grad():
-        ppo.policy.action_net.weight.copy_(model.head.weight)
-        ppo.policy.action_net.bias.copy_(model.head.bias)
+    if args.head == "cat":
+        # 分类头:解码头模块寄居 fork 命名空间(gym_donkeycar),rl_eval import 链
+        # 天然可反序列化;mean=action_net(latent) 即 softmax 期望,零改动可评测。
+        from gym_donkeycar.envs.bc_decode import ExpectDecode
+        dec = ExpectDecode(512, N_STEER_BIN, N_THR_BIN)
+        dec.head_s.load_state_dict(model.head_s.state_dict())
+        dec.head_t.load_state_dict(model.head_t.state_dict())
+        ppo.policy.action_net = dec
+    else:
+        with torch.no_grad():
+            ppo.policy.action_net.weight.copy_(model.head.weight)
+            ppo.policy.action_net.bias.copy_(model.head.bias)
     ppo.num_timesteps = 0
     ppo.save(args.out)
     print("[bc] 导出 %s(rl_eval 零改动可评测)" % args.out)
