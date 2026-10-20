@@ -211,6 +211,7 @@ def main():
         conf["ctl_step_ms"] = args.ctl_step  # 量化异步控制(相位协议)
     if not args.state_obs:
         conf["cam_resolution"] = (args.cam_res[0], args.cam_res[1], 3)
+        conf["cam_config"] = {"img_enc": "JPG"}  # 触发 fork 的 img_w/h 注入块(否则 sim 恒 120×160)
     if args.record and args.state_obs:
         conf["cam_config"] = {"img_enc": "JPG"}  # 录帧强制有图(state 观测默认 none 会全黑)
     if args.launch_sim and (not args.state_obs or args.record):
