@@ -102,7 +102,18 @@ crashes=6/9,laps=0。
 同种子独立复测(`cpp_gate4_main_rerun.log`):avg_steps=1053.1,crashes=9/10——
 两批一致,非单次噪声。判定见下「重标定说明」。
 
-### 闸 5 浸泡(`outputs/cpp_gate5.log`)
+### 闸 5 浸泡 — PASS(`outputs/cpp_gate5.log`)
+
+- 10ms 节拍连续 600s:55,094 帧、52 次自动 reset(撞车后自动换种子续驾)、
+  **零断连**。
+- RSS 26.80MB → 27.22MB(Δ+0.42MB 为启动预热,150s 后完全平坦)→ 无内存增长。
+
+## 总结论
+
+四道闸:① PASS、② PASS、③ PASS、④ 部分 PASS(sanity/均值项过,crash 项两批
+一致 9/10 未达,理由见下)、⑤ PASS。**客户端天花板终结**:obs bit 级一致、
+处理环亚毫秒、10 分钟零断连零泄漏。驾驶侧残差已不归客户端——负面结论按判定树
+归档。
 
 ## 重标定说明(闸 4 主门 crash 一项)
 
