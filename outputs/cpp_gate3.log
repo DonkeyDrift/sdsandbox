@@ -1,0 +1,6 @@
+[gate3] ctl_step_ms=10 policy=idle (onnx infer included, action overridden)
+[gate3] frames=6001 seconds=60
+[gate3] proc(recv->send incl onnx) p50=0.064459 p95=0.111583 p99=0.168208 over_10ms=0%
+[gate3] onnx infer p50=0.046667 p95=0.080583
+[gate3] telemetry cycle mean=9.9984 p50=8.35567 p99=17.3215
+[gate3] gate(p95<6ms & over<2%): PASS
