@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityStandardAssets.CrossPlatformInput;
@@ -109,6 +109,23 @@ public class UnityStandardCarAdapter : MonoBehaviour, ICar {
 	{
 		accel = rb.velocity - vel;
 		vel = rb.velocity;
+
+		// 人驾 BC 录制桥:menu Manual Drive 的键盘由 CarUserControl 直调
+		// CarController.Move,绕开 ICar 字段——遥测 steering_angle/throttle 回显
+		// 恒零(2026-10-20 HBC 探针定案)。这里在 CarUserControl 之后(脚本序)
+		// 自读同一虚拟轴回写字段:GetSteering/GetThrottle÷steer_to_angle(16)
+		// 即归一化人驾动作;且与真实 Move 参数一致,双写无冲突。门=同车有
+		// 启用的 CarUserControl(人驾车);RL 车无该组件,字段仍由 TCP 独占。
+		var uc = GetComponent<UnityStandardAssets.Vehicles.Car.CarUserControl>();
+		if (uc != null && uc.enabled)
+		{
+			float h = UnityStandardAssets.CrossPlatformInput.CrossPlatformInputManager.GetAxis("Horizontal");
+			float v = UnityStandardAssets.CrossPlatformInput.CrossPlatformInputManager.GetAxis("Vertical");
+			steering = h * MaximumSteerAngle;  // 驱动保真(与 CarUserControl 的 Move 参数一致)
+			throttle = Mathf.Clamp01(v);
+			// 注意:遥测 echo = GetSteering()/steer_to_angle(16) = h×25/16,
+			// 客户端需 ×16/25 还原归一化(见 hbc_record.py STERER_ECHO_SCALE)
+		}
 
 		unityCar.Move(steering / MaximumSteerAngle, throttle, footBrake, handBrake);
 		gyro = rb.angularVelocity;

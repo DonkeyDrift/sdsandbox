@@ -83,3 +83,13 @@ outputs/rl_ppo_ckpt/
 outputs/rl_best/
 outputs/*.log
 outputs/unitylog_*.txt
+outputs/*.crash
+outputs/*.jsonl
+outputs/rec_*/
+outputs/rl_replay_*/
+outputs/rl_export/
+outputs/bc_data*/
+outputs/bc_*probe*/
+outputs/bc_data_probe.npz
+outputs/bc_probe_montage.jpg
+build_cpp/

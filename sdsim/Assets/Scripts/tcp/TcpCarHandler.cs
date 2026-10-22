@@ -617,6 +617,27 @@ namespace tk
             RlMode = GlobalState.rlMode || (int)NumField(json, "rl_mode", 0f) == 1;
             controlTimeoutMs = NumField(json, "control_timeout_ms", 0f);
 
+            // 人驾 BC 录制模式:不重spawn(架构上每个 TCP 连接已 spawn 专属车),
+            // 而是把本 handler 重绑到本地玩家车(cars[0],JoystickCarControl 驱动)。
+            // 之后遥测/图像/回显全部来自人驾车的真实状态;客户端只收不发控制。
+            if ((int)NumField(json, "observe_player", 0f) == 1)
+            {
+                var spawner2 = GameObject.FindObjectOfType<CarSpawner>();
+                if (spawner2 != null && spawner2.cars.Count > 0)
+                {
+                    GameObject player = spawner2.cars[0];
+                    carObj = player;
+                    car = player.GetComponent<ICar>();
+                    conf = player.GetComponent<CarConfig>();
+                    carComp0 = car as Car;
+                    camSensor = player.GetComponentInChildren<CameraSensor>();
+                    camSensorB = null;
+                    if (pm != null)
+                        iActiveSpan = pm.carPath.GetClosestSpanIndex(player.transform.position);
+                    Debug.Log("[TcpCarHandler] observe_player: handler 已重绑到本地玩家车");
+                }
+            }
+
             // 量化异步控制(car_config "ctl_step_ms": 数值,毫秒;0/缺省=旧行为)
             float ctlStepMs = NumField(json, "ctl_step_ms", 0f);
             ctlStepSec = ctlStepMs > 0f ? Mathf.Max(ctlStepMs / 1000f, 0.01f) : 0f;
