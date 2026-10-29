@@ -73,7 +73,9 @@ dataset
 build/
 dist/
 
-# RL 产物:文档(journal/报告)入库,二进制模型/日志留本地
+# RL 产物(2026-10-30 约定):模型二进制不进 git(remote 为 GitHub,单文件 >100MB 拒收),
+#   但必须随交接包(7z 全仓快照)流转——打包含 outputs/rl_* 模型集,细则见 AGENTS.md「模型交接约定」;
+#   git 只收文档(journal/review/报告)与代码;日志/tb/录屏/回放/崩溃现场/bc 数据集留本地
 outputs/*.zip
 outputs/rl_halloffame/
 outputs/rl_ckpt_*/

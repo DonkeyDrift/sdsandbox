@@ -77,6 +77,12 @@
   异步评测 3×2000 步一次约 7 分钟,频率必须调低);resume 路径不带 .zip 后缀(SB3 会自动补);
   已加回读超时兜底(CameraSensor,挂起 3s→回退同步 ReadPixels loud 记录),离屏长训不再冻死。
 - 多训练并行必须 `--run-name` 隔离(best/ckpt 目录),端口分段 9101+ / 9201+。
+- **模型交接约定(2026-10-30)**:RL 模型二进制(`outputs/rl_*.zip`、`rl_best_*`、`rl_ckpt_*`、
+  `rl_halloffame/`、`rl_ppo_ckpt/`、`rl_export/`,全量约 5.8G)**不进 git**(remote 为 GitHub,
+  单文件 >100MB 拒收),但**必须随交接包(7z 全仓快照)流转**——重建包 = git 跟踪内容 + `.git` +
+  `sdsim/*.csproj`+`sln` + 上述模型集;解包后 `--resume outputs/rl_<模型>` 直接可用,
+  `rl_export/` 的 ONNX 供 C++ 侧部署。tb/日志/录屏(rec_*)/回放(rl_replay_*)/崩溃现场(*.crash)/
+  bc_data* 数据集仍留本地不随包。
 - 相机跟随在同步模式冻结的坑:`CameraFollow` 原为 FixedUpdate + deltaTime 缩放——timeScale=0 时
   FixedUpdate 不跑且 deltaTime 恒 0,相机永久停在出生位。已改 Update + unscaledDeltaTime。
 - 观赏链路终版(2026-10-18 三轮攻坚):① 同步步进窗口模式摊匀——`TcpCarHandler.SyncStepSpread`
