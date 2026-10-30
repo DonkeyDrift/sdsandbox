@@ -21,6 +21,9 @@ public class SandboxServer : MonoBehaviour
     bool argHost = false;
     bool argPort = false;
 
+    // 9091/9092 各有一个 SandboxServer 实例都会跑 Start;限帧是应用级设置,只应用一次
+    static bool fpsCapApplied = false;
+
     public void CheckCommandLineConnectArgs()
     {
         string[] args = System.Environment.GetCommandLineArgs();
@@ -51,6 +54,10 @@ public class SandboxServer : MonoBehaviour
                 else if (args[i] == "--vsync")
                 {
                     GlobalState.vsync_count = int.Parse(args[i + 1]);
+                }
+                else if (args[i] == "--max_fps")
+                {
+                    GlobalState.max_fps = int.Parse(args[i + 1]);
                 }
                 else if (args[i] == "--rl")
                 {
@@ -99,11 +106,33 @@ public class SandboxServer : MonoBehaviour
             Debug.Log("SDSandbox vsync override -> " + GlobalState.vsync_count);
         }
 
+        // 前台帧率上限。启动场景是赛道而非 menu(见 EditorBuildSettings 场景序),
+        // menu 里 GlobalStateEditor 的 60 帧设置不会运行;工程质量档 vSyncCount=0,
+        // 不限帧时空场景可跑数千 fps(渲染空转,物理按 FixedUpdate 固定步长不受影响)。
+        // --rl 训练实例跳过,主循环行为保持与历史训练数据一致。
+        if (!GlobalState.rlMode && !fpsCapApplied && GlobalState.max_fps > 0)
+        {
+            fpsCapApplied = true;
+            Application.targetFrameRate = GlobalState.max_fps;
+            Debug.Log("SDSandbox fps cap -> " + GlobalState.max_fps);
+            StartCoroutine(ReportMeasuredFps());
+        }
         Debug.Log("SDSandbox Server starting.");
         _server.onClientConntedCB += new tk.TcpServer.OnClientConnected(OnClientConnected);
         _server.onClientDisconntedCB += new tk.TcpServer.OnClientDisconnected(OnClientDisconnected);
 
         _server.Run(host, port);
+    }
+
+    // 限帧生效后的实测回执:跳过启动首秒(场景加载抖动),统计其后 5 秒真实时间的帧数
+    IEnumerator ReportMeasuredFps()
+    {
+        yield return new WaitForSecondsRealtime(1f);
+        int frames = 0;
+        float start = Time.realtimeSinceStartup;
+        while (Time.realtimeSinceStartup - start < 5f) { frames++; yield return null; }
+        float elapsed = Time.realtimeSinceStartup - start;
+        Debug.Log("SDSandbox measured avg fps over 5s -> " + (frames / elapsed).ToString("F0"));
     }
 
     // It's our responsibility to create a GameObject with a TcpClient
