@@ -58,6 +58,9 @@ namespace tk
         int? resetSeed = null;
         Car carComp0;
 
+        // cam_config fps 键联动的渲染锁帧标记(见 SetCamConfig/OnDestroy)
+        bool renderFpsLockedByUs = false;
+
         bool asynchronous = true;
         float time_step = 0.1f;
         // ---- 量化异步控制(car_config ctl_step_ms>0 且异步模式开启)----
@@ -151,6 +154,14 @@ namespace tk
 
         public void OnDestroy()
         {
+            // 恢复 cam_config fps 键联动的渲染锁帧(SetCamConfig),还原为
+            // SandboxServer 启动时的全局上限。
+            if (renderFpsLockedByUs)
+            {
+                renderFpsLockedByUs = false;
+                Application.targetFrameRate = GlobalState.max_fps;
+            }
+
             if (client != null && client.dispatcher != null)
                 client.dispatcher.Reset();
 
@@ -705,7 +716,19 @@ namespace tk
             // cam_config 的 fps 键:遥测推流帧率。必须在主线程应用(发送节流在
             // Update 里读 limitFPS)。<=0 保持默认 20 不变,向后兼容。
             if (fps > 0f)
+            {
                 limitFPS = fps;
+                // 遥测发送节流挂在 Update(渲染循环)。渲染帧率与遥测帧率不成
+                // 整数倍时门控出帧拍频(渲染 ~80fps + 60Hz 门控 → 12/22ms 交替),
+                // 抖动沿链路直达浏览器 jitter buffer(实测贡献 ~13ms)。锁渲染到
+                // 请求帧率:帧时间 >= 门控间隔后每个 Update 都过门,出帧间隔天然
+                // 均匀。多客户端共享全局,后到覆盖;本车销毁时恢复(OnDestroy)。
+                if (!renderFpsLockedByUs && !GlobalState.rlMode)
+                {
+                    renderFpsLockedByUs = true;
+                    Application.targetFrameRate = (int)Mathf.Round(fps);
+                }
+            }
 
             CameraSensor cam = null;
 
