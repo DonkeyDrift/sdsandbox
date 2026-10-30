@@ -1316,3 +1316,48 @@ mycar 环路(donkeycar 部署栈) **无 cte 终止**——车可越界再回,不
 - 消融矩阵: 60Hz/赛道/出生点/宽松 cte 四因子排除
 - 机制定论: mycar 环路无 cte 终止是"优异"评估的条件,纠偏能力是 pilot 瓶颈
 - 代码: src/pilot_wrapper.py + src/pilot_probe.py + rl_eval --pilot 集成
+
+## 2026-10-31 00:50 [V3-ANCHOR] 任务零收官:探针三件套 ALL PASS + 教师数据卡 + vision3 基准重标定
+
+### 环境事故(前夜)
+- 10-30 15:20 有人装 TF 2.15.1 把 numpy 降到 1.26.4,全部 SB3 zip(numpy 2 保存)加载报
+  `No module named 'numpy._core.numeric'`。处理:卸 TF + numpy 2.0.2 + ml_dtypes 0.5.4。
+  当前环境:numpy 2.0.2 / torch 2.8.0 / SB3 2.7.1 / python 3.9。
+
+### 探针三件套(src/v3anchor_probe.py,ALL PASS)
+1. **λ=0 resume 逐位一致**:vision3 载入 + MethodType 绑 PPOBC 方法 + λ=0,
+   与原版 PPO.train 在同一 rollout buffer(全局 np.random.seed 重放 minibatch 序)
+   上 n_params_diff=0 / max_diff=0.000e+00。
+   过程中发现并修复真 bug:PPOBC.train 的 `super().train()` 在 resume 路径
+   (MethodType 绑到 PPO 实例)下 TypeError——已改显式 `PPO.train(self)`。
+2. **BC loss 梯度非零**:bc_loss=0.3269,action_net|g|=5.76e+01,features_extractor|g|=9.40e+01。
+3. **120×160 管线对齐**:load_bc_dataset roundtrip mean|d|=0.00(同分辨率恒等),
+   通道均值逐位一致,帧间差 5.74(真图)。
+
+### 教师数据卡(bc_collect.py --vision --async,outputs/bc_v3anchor/)
+- 15000 对 / 20+ 局 / 域 8200,8300,8100 轮转 seed / spawn 与训练同分布
+  (node 5-245, lat 1.0, heading 8) / 每局剔尾 10 步 / 异步 20Hz(vision3 原生 regime)。
+- **vision3 行为分布**:steer mean 0.012 std 0.470,|steer|>0.3 = **85.8%**(高频大纠偏);
+  throttle mean **0.016**,>0.2 仅 **2.4%**(近恒零油门+偶发脉冲)。
+  三方对照:人驾 thr>0.2=97.6%/|steer|>0.3=36.5%;champion thr mean 0.247/37.8%>0.2。
+  → 自锚先验="vision3 式低速大纠偏"。λ·MSE 拉向该先验有"锚回弱行为"风险,
+  由 λ=0 对照臂归因,金丝雀门(主臂 ep_len≥对照×0.9)兜底。
+- 采集环路曾疑 bug(sync/async 下教师都早崩+低油门),rl_eval 同 seed 同数字(344 vs 426 步)
+  证伪——是教师真实水位,非管线错位。
+
+### 重要重标定:vision3 基线在新门下的真实水位(8200×10 复测,rl_reeval_vision3_8200x10.log)
+- 旧档案 899.3(steps 口径,无进展门)。新门(mean_speed≥1.0 + 帧差 parked 检测):
+  **valid 4/10,parked 6/10,valid avg 681.5 步 / mean_speed 1.27,valid 全 cte 崩**。
+  seed8200 两复测间被 1.0 门翻转(1.078 vs 0.708)——单 seed 在门附近高方差。
+- 影响:V3-ANCHOR 的"超 899.3"判据实际锚定的是含停车水分的旧口径;
+  验收以新门 valid avg 为准报告,并列旧口径对照。
+
+### 双仓提交
+- sdsandbox 322ac92(INFLIGHT 全套 + V3-ANCHOR 探针 + PPOBC resume 修复);
+  GymDonkeyCar e585b9c(obs_inflight 门控)。
+
+### 在飞
+- [INFLIGHT] 双臂续训(125k ckpt resume,曾因后台超时被杀一次):主臂 ~500k/1M
+  (ep_len 231-236),对照臂 ~473k/1M(ep_len ~206),12 维主臂暂领先。
+- [V3-ANCHOR] 金丝雀双臂 10k 发车(λ=0.1 恒定 anneal 界外;对照臂 λ=0 纯续训;
+  端口 9521/9531,fps~17)。
