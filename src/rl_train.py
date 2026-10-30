@@ -375,8 +375,11 @@ class PPOBC(PPO):
 
     def save(self, path, exclude=None, include=None):
         # 大数组不进 zip（BC 数据每轮从磁盘重载即可）
+        # 注:resume 路径下 self 是 MethodType 绑到 PPO 实例的对象,super() 二参形式
+        # 会 TypeError(super(type, obj): obj must be an instance)——与 train() 同款,
+        # 显式走 PPO.save。金丝雀 zip 丢失案(v3anchor_main 110k 崩溃存档失败)。
         exclude = list(exclude or []) + ["_bc_obs", "_bc_acts"]
-        return super().save(path, exclude=exclude, include=include)
+        return PPO.save(self, path, exclude=exclude, include=include)
 
     def _current_lambda(self):
         if self.bc_lambda <= 0:

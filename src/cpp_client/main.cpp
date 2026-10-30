@@ -241,6 +241,7 @@ static int gate2(const Args& a) {
     long n = 0, obs_fail = 0, act_fail = 0;
     double max_obs_diff = 0, max_act_diff = 0;
     int cur_ep = -1;
+    long last_frame_id = -1;
     const int expect_dim = a.obs_inflight ? 12 : 8;
     while (std::getline(in, line)) {
         if (line.empty()) continue;
@@ -249,7 +250,19 @@ static int gate2(const Args& a) {
         if (rec.contains("ep") && rec["ep"].get<int>() != cur_ep) {
             cur_ep = rec["ep"].get<int>();
             st.clear_episode();  // 也清零在飞历史
+            last_frame_id = -1;
         }
+        // 录制侧已知工件:异步模式 ep 尾部偶发同 (ep,frame_id) 重复行,其 telemetry
+        // 相对该行 obs 是陈旧键(观测态已前进)——C++ 无法重建该态,跳过 obs 对比,
+        // 但仍推进在飞历史(下一行 obs 期望包含本行动作)。
+        long fid = rec["telemetry"].contains("frame_id") ? rec["telemetry"]["frame_id"].get<long>() : -1;
+        if (fid >= 0 && fid == last_frame_id) {
+            auto exp_act_skip = rec["action"].get<std::vector<double>>();
+            st.record_action(static_cast<float>(exp_act_skip[0]), static_cast<float>(exp_act_skip[1]));
+            n++;
+            continue;
+        }
+        if (fid >= 0) last_frame_id = fid;
         st.on_telemetry(rec["telemetry"]);
         auto obs = st.obs_vector();
         auto exp_obs = rec["obs"].get<std::vector<double>>();
@@ -262,15 +275,27 @@ static int gate2(const Args& a) {
         double d = 0;
         for (int i = 0; i < expect_dim; ++i) d = std::max(d, std::fabs(obs[i] - exp_obs[i]));
         max_obs_diff = std::max(max_obs_diff, d);
-        if (d > 1e-4) obs_fail++;
+        if (d > 1e-4) {
+            obs_fail++;
+            if (obs_fail <= 5) {
+                std::cout << "[gate2] fail#" << obs_fail << " frame=" << n
+                          << " ep=" << cur_ep << " step=" << (rec.contains("step") ? rec["step"].get<int>() : -1)
+                          << " diffs:";
+                for (int i = 0; i < expect_dim; ++i)
+                    std::cout << " d" << i << "=" << (obs[i] - exp_obs[i]);
+                std::cout << "\n";
+            }
+        }
 
         auto act = policy.infer(obs);
         auto exp_act = rec["action"].get<std::vector<double>>();
         double ad = std::max(std::fabs(act[0] - exp_act[0]), std::fabs(act[1] - exp_act[1]));
         max_act_diff = std::max(max_act_diff, ad);
         if (ad > 1e-4) act_fail++;
-        // 推断动作进入在飞历史(镜像部署态:下帧 obs 含 [a_i, a_{i-1}])
-        st.record_action(act[0], act[1]);
+        // 在飞历史记【录制侧动作】(非本侧推断):两侧共享同一历史,obs 段测纯构造
+        // 一致性;动作段单独测推断数值一致性。若记推断动作,1e-4 级浮点噪声会经
+        // 在飞槽反馈放大成轨迹级分叉(帧 840 起 1e-4 → 1.72 案例),门失去意义。
+        st.record_action(static_cast<float>(exp_act[0]), static_cast<float>(exp_act[1]));
         n++;
     }
     std::cout << "[gate2] frames=" << n << " max_obs_diff=" << max_obs_diff

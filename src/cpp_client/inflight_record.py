@@ -159,13 +159,14 @@ def record(args):
         seed = args.seed + ep
         handler.reset(seed=seed)
         obs8, _, _, _ = handler.observe()
-        assert handler.steps_since_reset == 1
+        frame_key = handler.steps_since_reset  # observe 后立刻捕获(predict 期间会前进)
+        assert frame_key == 1
         # 决策 0:历史空 → 在飞全零(镜像 wrapper reset + C++ clear_episode)
         recent = []  # 旧→新,只留最近 2 个
         obs12 = np.concatenate([np.asarray(obs8, dtype=np.float32),
                                 *inflight_pair(recent)]).astype(np.float32)
         action, _ = model.predict(obs12, deterministic=True)
-        emit(obs12, action, handler.steps_since_reset, ep, 0)
+        emit(obs12, action, frame_key, ep, 0)
 
         step = 0
         done = False
@@ -175,11 +176,12 @@ def record(args):
             ctl.take_action(action)
             obs8, _, done, _ = handler.observe()
             step += 1
-            assert handler.steps_since_reset == step + 1
+            frame_key = handler.steps_since_reset  # TOCTOU 修复:predict 前捕获帧号
+            assert frame_key == step + 1
             obs12 = np.concatenate([np.asarray(obs8, dtype=np.float32),
                                     *inflight_pair(recent)]).astype(np.float32)
             action, _ = model.predict(obs12, deterministic=True)
-            emit(obs12, action, handler.steps_since_reset, ep, step)
+            emit(obs12, action, frame_key, ep, step)
         print("[record] ep%d done=%s steps=%d" % (ep, done, step))
 
     out.close()
