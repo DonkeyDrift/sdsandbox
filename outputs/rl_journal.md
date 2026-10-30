@@ -1170,3 +1170,55 @@ vision3 单帧 899。
   不进 DAgger)。
 - 视觉轨最终档案不变:vision3 单帧 899.3;HBC 产物(rl_hbc_reg/cat.zip+
   bc_human_data)归档备查,不入 halloffame。
+
+---
+
+## [PPOBC] PPO+BC 混合正则(人驾先验) —— 金丝雀预注册停报(2026-10-30)
+
+### 配方(预注册,未改门)
+- 损失 = PPO loss + λ·MSE(π_mode(s_human), a_human);λ=0.2,50k→100k 线性退火到 0。
+- 无罚奖励;人驾数据 outputs/bc_human_data/(7884 对,240×320→120×160 bilinear+antialias)。
+- CLI:--bc-lambda/--bc-data/--bc-batch 256/--bc-anneal-from 50000/--bc-anneal-to 100000。
+- 实现:PPOBC(PPO) 覆写 train();λ≤0 走 super().train();BC 路径
+  features_extractor(0..1 float)+mlp_extractor+dist.mode()(绕过 preprocess /255)。
+
+### 探针三件套(全绿,outputs/ppobc_probe.log)
+1. BC 梯度:bc_loss=0.515,action_net|g|=142,extractor|g|=264,all|g|=406(≫1e-6)。
+2. λ=0 回归:同 seed learn(256) 后与原版 PPO **n_params_diff=0**。
+3. 降采样:通道均值 obs=src=[98.6,108.8,119.1],左右空间一致,帧间 mean|d|=5.72。
+- 附:PPOBC.save 排除大数组;PPO.load 往返成功(rl_eval 零改动)。
+
+### 双臂金丝雀 10k(--vision --async-mode --envs 1 --eval-envs 0 --epochs 10 --lr 3e-4)
+| 臂 | 端口/run-name | ep_len last/tail | ep_rew last | fps | tb |
+|---|---|---|---|---|---|
+| 主臂 λ=0.2 | 9501 / ppobc_canary | **57.0** / 54.3 | 53.0 | 8 | rl_tb/ppobc_canary_1 |
+| 对照 λ=0 | 9502 / ppobc_canary0 | 69.0 / 64.4 | 39.2 | 11 | rl_tb/ppobc_canary0_1 |
+- 主臂 bc_loss 0.369→0.182(先验被拟合但未换来存活)。
+- 预注册判据:≥150 继续 / <80 **停报** / 80-150 灰区。主臂 57 < 80 → **停报,不进全量**。
+
+### crash 签名核查(闭环 ×2,--record,seed 8200/8201,max 800)
+| 模型 | avg steps | avg reward | mean_speed | crash | 形态 |
+|---|---|---|---|---|---|
+| 主臂 rl_ppobc_canary.zip | **54** | 91.0 | 2.55 | 2/2 | 64/44 步 cte -2.7/-2.7 崩 |
+| 对照 rl_ppobc_canary0.zip | **175** | 355.1 | 2.96 | 2/2 | 250(完圈1)/100 步 cte 崩 |
+- 主臂非停车(帧差 21-23,mean_speed 2.5)——**真驾驶偏快死**;与 HBC ~30 步跑偏同族但更慢。
+- 对照臂同预算闭环 **3.2 倍于主臂**;train ep_rew 主臂更高(53 vs 39)而 ep_len 更低
+  = 油门顶桶先验把策略推向"高奖励短命"侧,与风险预告"地板油双刃剑"一致。
+- 蒙太奇:outputs/rec_ppobc_canary_probe/ep0{0,1}_*/montage.jpg、
+  outputs/rec_ppobc_canary0_probe/... (留人工抽看)。
+
+### 判定:干净证伪(金丝雀门)——"行为先验不足以在 10k 尺度约束探索"
+- 预注册允许的合法终点:不进 100k,不做 λ 退火消融与双域终验(门未达,禁止烧机时)。
+- 机制层读数:BC 项确实在降 bc_loss(0.37→0.18)= 梯度通路工作;但对 ep_len
+  是**负贡献**(57 vs 对照 69;闭环 54 vs 175)。人驾先验在当前 λ/数据下
+  未起到"反停车/反奖励黑客"的预期约束,反而与无罚奖励合流出更快的早死。
+- 与既往合流:PPO 奖励两难 + 观测升级 + BC 三口味 + HBC + **PPOBC 先验正则**
+  五路封盘;视觉轨档案最佳保持 vision3 899.3。
+- 代码资产:PPOBC 类+探针+tb_summary 已入库,后续若用户重新授权可直接复用
+  (改 λ/数据/退火须新预注册)。
+
+### 证据路径
+- 探针:outputs/ppobc_probe.log
+- 训练日志:outputs/ppobc_canary_main.log / ppobc_canary_ctrl.log
+- 评测日志:outputs/ppobc_canary_eval_main.log / ppobc_canary_eval_ctrl.log
+- 模型:outputs/rl_ppobc_canary.zip / rl_ppobc_canary0.zip(不入 halloffame)

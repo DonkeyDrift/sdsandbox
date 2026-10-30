@@ -10,13 +10,18 @@
 """
 
 import argparse
+import glob
 import os
 
 import numpy as np
+import torch as th
+import torch.nn.functional as F
 import gymnasium as gym
 import gym_donkeycar  # noqa: F401 注册 donkey-* env
+from gymnasium import spaces
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback, EvalCallback
+from stable_baselines3.common.utils import explained_variance
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 
 SPAWN_DEFAULT = {
@@ -97,6 +102,17 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=1, help="训练/出生随机种子")
     parser.add_argument("--save", default=None, help="最终模型保存路径(默认 outputs/rl_<algo>.zip)")
     parser.add_argument("--tb", default="outputs/rl_tb", help="tensorboard 日志目录")
+    parser.add_argument("--bc-lambda", type=float, default=0.0,
+                        help="PPO+BC 混合正则权重 λ(默认 0=关;仅 --vision --algo ppo)。"
+                             "损失 = PPO loss + λ·MSE(π_mean(s_human), a_human)")
+    parser.add_argument("--bc-data", default="outputs/bc_human_data",
+                        help="人驾 BC 数据目录(bc_*.npz,键 image/steer/throttle)")
+    parser.add_argument("--bc-batch", type=int, default=256,
+                        help="每 minibatch 掺入的人驾小批量大小")
+    parser.add_argument("--bc-anneal-from", type=int, default=50000,
+                        help="λ 线性退火起点(环境步)")
+    parser.add_argument("--bc-anneal-to", type=int, default=100000,
+                        help="λ 线性退火终点(步,降到 0)")
     return parser.parse_args()
 
 
@@ -269,6 +285,190 @@ class CamDRWrapper(gym.Wrapper):
         return obs, info
 
 
+def load_bc_dataset(data_dir, out_hw=(120, 160)):
+    """加载人驾 BC 数据并降采样到策略观测分辨率。
+
+    返回 (obs_uint8_chw, acts_float32)：
+      obs: (N, 3, H, W) uint8——按 batch 再 /255，省内存；
+      acts: (N, 2) float32，列 = (steer, throttle)。
+    训练与探针共用本函数，保证两侧输入完全同源。
+    """
+    paths = sorted(glob.glob(os.path.join(data_dir, "bc_*.npz")))
+    if not paths:
+        raise FileNotFoundError("bc 数据未找到: %s/bc_*.npz" % data_dir)
+    obs_list, act_list = [], []
+    for p in paths:
+        d = np.load(p)
+        obs_list.append(np.asarray(d["image"]))
+        act_list.append(np.stack([d["steer"], d["throttle"]], axis=1).astype(np.float32))
+    imgs = np.concatenate(obs_list, axis=0)  # N,H,W,3 uint8
+    acts = np.concatenate(act_list, axis=0)
+    t = th.from_numpy(imgs).permute(0, 3, 1, 2).float().div_(255.0)  # N,3,H,W in [0,1]
+    t = F.interpolate(t, size=out_hw, mode="bilinear", antialias=True)
+    obs = (t.clamp(0.0, 1.0) * 255.0).round().to(th.uint8).contiguous().numpy()
+    return obs, acts
+
+
+class PPOBC(PPO):
+    """demo-augmented PPO：每轮更新掺人驾 (s_h, a_h) 小批量，
+    loss = PPO loss + λ·MSE(π_mean(s_h), a_h)，λ 可线性退火。
+
+    λ<=0 时 train() 直接走父类，保证与原版 PPO 逐位一致（探针②）。
+    BC 输入走 features_extractor(0..1 float CHW)，绕过 preprocess_obs
+    的 uint8 /255，避免二次除法。
+    """
+
+    def __init__(self, *args, bc_lambda=0.0, bc_data_dir="outputs/bc_human_data",
+                 bc_batch=256, bc_anneal_from=50000, bc_anneal_to=100000, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bc_lambda = float(bc_lambda)
+        self.bc_data_dir = bc_data_dir
+        self.bc_batch = int(bc_batch)
+        self.bc_anneal_from = int(bc_anneal_from)
+        self.bc_anneal_to = int(bc_anneal_to)
+        # 懒加载：λ=0 路径不触碰数据，保证与 PPO 训练流零差异
+        self._bc_obs = None
+        self._bc_acts = None
+        self._bc_rng = np.random.default_rng(int(kwargs.get("seed", 0) or 0))
+
+    def save(self, path, exclude=None, include=None):
+        # 大数组不进 zip（BC 数据每轮从磁盘重载即可）
+        exclude = list(exclude or []) + ["_bc_obs", "_bc_acts"]
+        return super().save(path, exclude=exclude, include=include)
+
+    def _current_lambda(self):
+        if self.bc_lambda <= 0:
+            return 0.0
+        t = self.num_timesteps
+        if t < self.bc_anneal_from:
+            return float(self.bc_lambda)
+        if t >= self.bc_anneal_to:
+            return 0.0
+        frac = (t - self.bc_anneal_from) / max(1, self.bc_anneal_to - self.bc_anneal_from)
+        return float(self.bc_lambda) * (1.0 - frac)
+
+    def _ensure_bc_data(self):
+        if self._bc_obs is None:
+            self._bc_obs, self._bc_acts = load_bc_dataset(self.bc_data_dir)
+            print("[PPOBC] 加载人驾数据 %d 对 -> obs %s acts %s"
+                  % (len(self._bc_obs), self._bc_obs.shape, self._bc_acts.shape))
+
+    def _sample_bc_batch(self):
+        self._ensure_bc_data()
+        n = len(self._bc_obs)
+        idx = self._bc_rng.integers(0, n, size=self.bc_batch)
+        obs = th.as_tensor(self._bc_obs[idx], device=self.policy.device).float().div_(255.0)
+        acts = th.as_tensor(self._bc_acts[idx], device=self.policy.device)
+        return obs, acts
+
+    def _bc_mean_loss(self, obs01, acts):
+        """MSE(π_mean(s), a)。走 features_extractor + mlp_extractor + action_net
+        的与 evaluate_actions 相同的 mean 路径（dist.mode() = 高斯均值，不含采样）。"""
+        features = self.policy.features_extractor(obs01)
+        latent_pi, _ = self.policy.mlp_extractor(features)
+        dist = self.policy._get_action_dist_from_latent(latent_pi)
+        return F.mse_loss(dist.mode(), acts)
+
+    def train(self) -> None:
+        lam = self._current_lambda()
+        if lam <= 0:
+            return super().train()
+
+        # ---- PPO.train() 蓝本 + BC 项 ----
+        self.policy.set_training_mode(True)
+        self._update_learning_rate(self.policy.optimizer)
+        clip_range = self.clip_range(self._current_progress_remaining)
+        if self.clip_range_vf is not None:
+            clip_range_vf = self.clip_range_vf(self._current_progress_remaining)
+
+        entropy_losses = []
+        pg_losses, value_losses, bc_losses = [], [], []
+        clip_fractions = []
+
+        continue_training = True
+        for epoch in range(self.n_epochs):
+            approx_kl_divs = []
+            for rollout_data in self.rollout_buffer.get(self.batch_size):
+                actions = rollout_data.actions
+                if isinstance(self.action_space, spaces.Discrete):
+                    actions = rollout_data.actions.long().flatten()
+
+                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values = values.flatten()
+                advantages = rollout_data.advantages
+                if self.normalize_advantage and len(advantages) > 1:
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+                ratio = th.exp(log_prob - rollout_data.old_log_prob)
+                policy_loss_1 = advantages * ratio
+                policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
+                policy_loss = -th.min(policy_loss_1, policy_loss_2).mean()
+                pg_losses.append(policy_loss.item())
+                clip_fraction = th.mean((th.abs(ratio - 1) > clip_range).float()).item()
+                clip_fractions.append(clip_fraction)
+
+                if self.clip_range_vf is None:
+                    values_pred = values
+                else:
+                    values_pred = rollout_data.old_values + th.clamp(
+                        values - rollout_data.old_values, -clip_range_vf, clip_range_vf
+                    )
+                value_loss = F.mse_loss(rollout_data.returns, values_pred)
+                value_losses.append(value_loss.item())
+
+                if entropy is None:
+                    entropy_loss = -th.mean(-log_prob)
+                else:
+                    entropy_loss = -th.mean(entropy)
+                entropy_losses.append(entropy_loss.item())
+
+                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+
+                # ---- BC 正则（本轮唯一新增）----
+                bc_obs, bc_acts = self._sample_bc_batch()
+                bc_loss = self._bc_mean_loss(bc_obs, bc_acts)
+                bc_losses.append(bc_loss.item())
+                loss = loss + lam * bc_loss
+
+                with th.no_grad():
+                    log_ratio = log_prob - rollout_data.old_log_prob
+                    approx_kl_div = th.mean((th.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
+                    approx_kl_divs.append(approx_kl_div)
+
+                if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
+                    continue_training = False
+                    if self.verbose >= 1:
+                        print("Early stopping at step %d due to reaching max kl: %.2f" % (epoch, approx_kl_div))
+                    break
+
+                self.policy.optimizer.zero_grad()
+                loss.backward()
+                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                self.policy.optimizer.step()
+
+            self._n_updates += 1
+            if not continue_training:
+                break
+
+        explained_var = explained_variance(self.rollout_buffer.values.flatten(),
+                                           self.rollout_buffer.returns.flatten())
+        self.logger.record("train/entropy_loss", np.mean(entropy_losses))
+        self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
+        self.logger.record("train/value_loss", np.mean(value_losses))
+        self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
+        self.logger.record("train/clip_fraction", np.mean(clip_fractions))
+        self.logger.record("train/loss", loss.item())
+        self.logger.record("train/explained_variance", explained_var)
+        self.logger.record("train/bc_loss", np.mean(bc_losses) if bc_losses else 0.0)
+        self.logger.record("train/bc_lambda", lam)
+        if hasattr(self.policy, "log_std"):
+            self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
+        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
+        self.logger.record("train/clip_range", clip_range)
+        if self.clip_range_vf is not None:
+            self.logger.record("train/clip_range_vf", clip_range_vf)
+
+
 def _close_vec_env(env):
     """收尾关闭 VecEnv。中断时 worker 可能卡在同步步进的 sim 等待上,优雅 close 会
     在 pipe.recv() 死等(gymnasium 对 idle worker 的 close 无超时);先给 10s 优雅窗口,
@@ -320,12 +520,33 @@ def main():
             args.frame_stack, args.frame_stack))
 
     policy = "MlpPolicy" if args.state_obs else "CnnPolicy"
+    use_bc = args.bc_lambda > 0
+    if use_bc:
+        if args.state_obs or args.algo != "ppo":
+            raise SystemExit("--bc-lambda 仅支持 --vision --algo ppo")
+        if args.resume:
+            raise SystemExit("本轮 PPOBC 不支持 --resume + --bc-lambda(全新训)")
     if args.resume:
         ctor = PPO if args.algo == "ppo" else SAC
         model = ctor.load(args.resume, env=envs, tensorboard_log=args.tb, verbose=1)
         if args.lr is not None:
             model.learning_rate = args.lr  # 覆盖已存学习率(续训已收敛模型必配)
         print("[rl_train] resumed from %s lr=%s" % (args.resume, args.lr))
+    elif use_bc:
+        model = PPOBC(
+            policy, envs,
+            n_steps=512, batch_size=128, gamma=0.99, gae_lambda=0.95,
+            n_epochs=args.epochs if args.epochs is not None else 10,
+            ent_coef=args.ent_coef if args.ent_coef is not None else 0.01,
+            learning_rate=args.lr if args.lr is not None else 3e-4,
+            seed=args.seed, tensorboard_log=args.tb, verbose=1,
+            bc_lambda=args.bc_lambda, bc_data_dir=args.bc_data,
+            bc_batch=args.bc_batch,
+            bc_anneal_from=args.bc_anneal_from, bc_anneal_to=args.bc_anneal_to,
+        )
+        print("[rl_train] PPOBC: λ=%.3f anneal %d→%d batch=%d data=%s"
+              % (args.bc_lambda, args.bc_anneal_from, args.bc_anneal_to,
+                 args.bc_batch, args.bc_data))
     elif args.algo == "ppo":
         model = PPO(
             policy, envs,
