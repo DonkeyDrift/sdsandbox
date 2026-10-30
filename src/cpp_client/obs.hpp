@@ -5,9 +5,11 @@
 // 计算(先算 forward_vel 再更新 vel/姿态),C++ 必须同样顺序,否则 obs 逐点不合。
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -35,6 +37,9 @@ struct ObsState {
     // rl_eval 参数
     double max_cte = 2.5;
     double stuck_thresh = 2.5;
+    // INFLIGHT: 在飞指令入观测(8→12 维)。默认关。
+    bool obs_inflight = false;
+    float inflight[4] = {0.f, 0.f, 0.f, 0.f};  // [a_{k-1}.steer, a_{k-1}.thr, a_{k-2}.steer, a_{k-2}.thr]
 
     // fork on_telemetry 的字段处理顺序(fork 行 715-795)。
     void on_telemetry(const nlohmann::json& m) {
@@ -123,17 +128,36 @@ struct ObsState {
         if (stuck_time > stuck_thresh) over = true;
     }
 
-    // fork observe() 的 8 维状态向量(float32 截断前用 double 算,与 numpy 一致)
-    std::array<float, 8> obs_vector() const {
-        return {static_cast<float>(cte / 2.0),
-                static_cast<float>(speed / 10.0),
-                static_cast<float>(forward_vel / 10.0),
-                static_cast<float>(yaw / 180.0),
-                static_cast<float>(gyro_z / 90.0),
-                static_cast<float>(static_cast<double>(active_node) /
-                                    std::max(total_nodes, 1)),
-                0.0f,
-                0.0f};
+    // fork observe() 的状态向量(float32 截断前用 double 算,与 numpy 一致)。
+    // obs_inflight 时追加 [a_{k-1}, a_{k-2}](最新在前,record_action 维护),
+    // 与训练侧 ActionDelayWrapper._augment 顺序逐位一致。
+    std::vector<float> obs_vector() const {
+        std::vector<float> v = {static_cast<float>(cte / 2.0),
+                                static_cast<float>(speed / 10.0),
+                                static_cast<float>(forward_vel / 10.0),
+                                static_cast<float>(yaw / 180.0),
+                                static_cast<float>(gyro_z / 90.0),
+                                static_cast<float>(static_cast<double>(active_node) /
+                                                    std::max(total_nodes, 1)),
+                                0.0f,
+                                0.0f};
+        if (obs_inflight) {
+            v.push_back(inflight[0]);
+            v.push_back(inflight[1]);
+            v.push_back(inflight[2]);
+            v.push_back(inflight[3]);
+        }
+        return v;
+    }
+
+    // 记录策略刚发出的动作 a_k:滑动后 inflight = [a_k, a_{k-1}],
+    // 使下一次 obs_vector() 返回含 [a_k, a_{k-1}] 的 12 维观测
+    // (镜像 wrapper:step(a_k) 内 append 后 _augment 取 [recent[-1], recent[-2]])。
+    void record_action(float steer, float throttle) {
+        inflight[2] = inflight[0];
+        inflight[3] = inflight[1];
+        inflight[0] = steer;
+        inflight[1] = throttle;
     }
 
     // fork calc_reward(crash_penalty=0 的 rl_eval 口径)
@@ -162,6 +186,8 @@ struct ObsState {
         frame_id = 0;
         active_node = 0;
         total_nodes = 1;
+        // INFLIGHT: 新局清零在飞历史
+        inflight[0] = inflight[1] = inflight[2] = inflight[3] = 0.0f;
     }
 };
 

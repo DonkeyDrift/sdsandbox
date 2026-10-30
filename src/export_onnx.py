@@ -68,11 +68,13 @@ def main():
     args = ap.parse_args()
 
     model = PPO.load(args.model, device="cpu")
-    assert isinstance(model.observation_space.shape, tuple) and model.observation_space.shape == (8,), \
-        "导出只支持状态量 8 维观测模型(MlpPolicy),vision CNN 请走 torch.jit"
+    obs_shape = model.observation_space.shape
+    assert isinstance(obs_shape, tuple) and obs_shape in ((8,), (12,)), \
+        "导出只支持状态量 8/12 维观测模型(MlpPolicy),vision CNN 请走 torch.jit"
+    obs_dim = obs_shape[0]
 
     wrapped = ExportPolicy(model.policy).eval()
-    obs = torch.zeros(1, 8)
+    obs = torch.zeros(1, obs_dim)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     torch.onnx.export(
         wrapped, obs, args.out,
@@ -84,7 +86,7 @@ def main():
     # 数值一致性:onnx.reference 参考实现 vs SB3 确定性 predict
     from onnx.reference import ReferenceEvaluator
     rng = np.random.default_rng(0)
-    cases = rng.normal(0, 0.5, (16, 8)).astype(np.float32)
+    cases = rng.normal(0, 0.5, (16, obs_dim)).astype(np.float32)
     sess = ReferenceEvaluator(args.out)
     ok = True
     for c in cases:
@@ -97,7 +99,12 @@ def main():
 
     spec = {
         "source_model": os.path.abspath(args.model),
-        "obs_vector": OBS_SPEC,
+        "obs_vector": OBS_SPEC + ([
+            ("a_{k-1}.steer", "最近一步策略输出转向"),
+            ("a_{k-1}.throttle", "最近一步策略输出油门"),
+            ("a_{k-2}.steer", "次近一步策略输出转向"),
+            ("a_{k-2}.throttle", "次近一步策略输出油门"),
+        ] if obs_dim == 12 else []),
         "action": ["steering [-1,1] 左正", "throttle [0,1]"],
         "num_check_cases": len(cases), "max_abs_diff_check": "1e-5",
     }

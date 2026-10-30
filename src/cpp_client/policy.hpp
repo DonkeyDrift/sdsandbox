@@ -1,11 +1,13 @@
-// ONNX Runtime(C API)策略推理封装:obs(1x8 float32) -> [steering, throttle]。
-// 输入/输出名与 src/export_onnx.py 的导出一致("obs"/"action"),单线程执行
-// 配置优先低延迟。
+// ONNX Runtime(C API)策略推理封装:obs(1xN float32) -> [steering, throttle]。
+// N 从模型输入 shape 自动读取(状态量 8 / INFLIGHT 增强 12),与 src/export_onnx.py
+// 的导出一致("obs"/"action"),单线程执行配置优先低延迟。
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <onnxruntime_c_api.h>
 
@@ -41,6 +43,25 @@ public:
         if (n_in != 1 || n_out < 1)
             throw std::runtime_error("unexpected onnx io counts: in=" +
                                      std::to_string(n_in) + " out=" + std::to_string(n_out));
+
+        // 读输入 obs 维度:shape 期望 [1, N]
+        OrtTypeInfo* typeinfo = nullptr;
+        st = api_->SessionGetInputTypeInfo(sess_, 0, &typeinfo);
+        check(st);
+        const OrtTensorTypeAndShapeInfo* tinfo = nullptr;
+        st = api_->CastTypeInfoToTensorInfo(typeinfo, &tinfo);
+        check(st);
+        size_t n_dim = 0;
+        st = api_->GetDimensionsCount(tinfo, &n_dim);
+        check(st);
+        std::vector<int64_t> dims(n_dim);
+        st = api_->GetDimensions(tinfo, dims.data(), n_dim);
+        check(st);
+        api_->ReleaseTypeInfo(typeinfo);
+        if (n_dim != 2 || (dims[0] != 1 && dims[0] != -1) || (dims[1] != 8 && dims[1] != 12))
+            throw std::runtime_error("unexpected obs shape dim=" + std::to_string(n_dim) +
+                                     " last=" + (n_dim ? std::to_string(dims.back()) : "?"));
+        obs_dim_ = dims[1];
     }
 
     ~Policy() {
@@ -51,11 +72,16 @@ public:
     Policy(const Policy&) = delete;
     Policy& operator=(const Policy&) = delete;
 
-    std::array<float, 2> infer(const std::array<float, 8>& obs) {
-        std::array<int64_t, 2> shape{1, 8};
+    int64_t obs_dim() const { return obs_dim_; }
+
+    std::array<float, 2> infer(const float* obs, int64_t n) {
+        if (n != obs_dim_)
+            throw std::runtime_error("obs dim mismatch: got " + std::to_string(n) +
+                                     " model expects " + std::to_string(obs_dim_));
+        std::array<int64_t, 2> shape{1, obs_dim_};
         OrtValue* tensor = nullptr;
         OrtStatus* st = api_->CreateTensorWithDataAsOrtValue(
-            meminfo_, const_cast<float*>(obs.data()), obs.size() * sizeof(float),
+            meminfo_, const_cast<float*>(obs), static_cast<size_t>(obs_dim_) * sizeof(float),
             shape.data(), shape.size(), ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &tensor);
         check(st);
 
@@ -73,6 +99,10 @@ public:
         return action;
     }
 
+    std::array<float, 2> infer(const std::vector<float>& obs) {
+        return infer(obs.data(), static_cast<int64_t>(obs.size()));
+    }
+
 private:
     void check(OrtStatus* st) {
         if (st != nullptr) {
@@ -86,6 +116,7 @@ private:
     OrtEnv* env_ = nullptr;
     OrtSession* sess_ = nullptr;
     OrtMemoryInfo* meminfo_ = nullptr;
+    int64_t obs_dim_ = 8;
 };
 
 }  // namespace dk

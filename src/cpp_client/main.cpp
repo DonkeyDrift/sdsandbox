@@ -145,6 +145,7 @@ struct Args {
     int episodes = 10;
     long seed_base = 8100;
     int max_steps = 2500;
+    bool obs_inflight = false;  // INFLIGHT 实验:观测含在飞指令(8→12 维)
 };
 
 static Args parse_args(int argc, char** argv) {
@@ -161,6 +162,7 @@ static Args parse_args(int argc, char** argv) {
         else if (k == "--episodes") a.episodes = std::stoi(next());
         else if (k == "--seed-base") a.seed_base = std::stol(next());
         else if (k == "--max-steps") a.max_steps = std::stoi(next());
+        else if (k == "--obs-inflight") a.obs_inflight = true;
         else throw std::runtime_error("unknown arg: " + k);
     }
     return a;
@@ -233,24 +235,32 @@ static int gate2(const Args& a) {
     if (!in) throw std::runtime_error("cannot open " + a.jsonl);
 
     dk::ObsState st;
+    st.obs_inflight = a.obs_inflight;
     st.clear_episode();
     std::string line;
     long n = 0, obs_fail = 0, act_fail = 0;
     double max_obs_diff = 0, max_act_diff = 0;
     int cur_ep = -1;
+    const int expect_dim = a.obs_inflight ? 12 : 8;
     while (std::getline(in, line)) {
         if (line.empty()) continue;
         json rec = json::parse(line, nullptr, false);
         if (rec.is_discarded() || !rec.contains("telemetry")) continue;
         if (rec.contains("ep") && rec["ep"].get<int>() != cur_ep) {
             cur_ep = rec["ep"].get<int>();
-            st.clear_episode();
+            st.clear_episode();  // 也清零在飞历史
         }
         st.on_telemetry(rec["telemetry"]);
         auto obs = st.obs_vector();
         auto exp_obs = rec["obs"].get<std::vector<double>>();
+        if (static_cast<int>(obs.size()) != expect_dim ||
+            static_cast<int>(exp_obs.size()) != expect_dim) {
+            std::cout << "[gate2] dim mismatch at frame " << n << ": cpp=" << obs.size()
+                      << " rec=" << exp_obs.size() << " expect=" << expect_dim << "\n";
+            return 1;
+        }
         double d = 0;
-        for (int i = 0; i < 8; ++i) d = std::max(d, std::fabs(obs[i] - exp_obs[i]));
+        for (int i = 0; i < expect_dim; ++i) d = std::max(d, std::fabs(obs[i] - exp_obs[i]));
         max_obs_diff = std::max(max_obs_diff, d);
         if (d > 1e-4) obs_fail++;
 
@@ -259,6 +269,8 @@ static int gate2(const Args& a) {
         double ad = std::max(std::fabs(act[0] - exp_act[0]), std::fabs(act[1] - exp_act[1]));
         max_act_diff = std::max(max_act_diff, ad);
         if (ad > 1e-4) act_fail++;
+        // 推断动作进入在飞历史(镜像部署态:下帧 obs 含 [a_i, a_{i-1}])
+        st.record_action(act[0], act[1]);
         n++;
     }
     std::cout << "[gate2] frames=" << n << " max_obs_diff=" << max_obs_diff
@@ -282,6 +294,7 @@ static int gate3(const Args& a) {
     drain(c, 1.2);
 
     dk::ObsState st;
+    st.obs_inflight = a.obs_inflight;
     std::vector<double> proc, infer, cycle;
     double arrive = now_ms(), tstart = arrive;
     long frames = 0;
@@ -300,6 +313,7 @@ static int gate3(const Args& a) {
         double steer = 0.0;
         if (a.policy == "sine") steer = 0.3 * std::sin(2.0 * M_PI * (t1 - tstart) / 2000.0);
         send_control(c, steer, 0.0, 0.0);
+        st.record_action(static_cast<float>(steer), 0.0f);  // 在飞历史记实际发出的动作
         proc.push_back(now_ms() - t1);
         frames++;
     }
@@ -336,6 +350,7 @@ static int run_episode(dk::SimClient& c, dk::Policy& policy, dk::ObsState& st, l
     reason = "max_steps";
     while (steps < max_steps) {
         auto act = policy.infer(obs);
+        st.record_action(act[0], act[1]);  // 在飞历史先入,下帧 obs 才含本动作
         send_control(c, act[0], act[1], 0.0);
         json t = c.next_telemetry();
         st.on_telemetry(t);
@@ -371,8 +386,10 @@ static int gate4(const Args& a) {
 
     std::cout << "[gate4] model=" << a.onnx << " ctl_step_ms=" << a.ctl_step
               << " episodes=" << a.episodes << " seed_base=" << a.seed_base
-              << " max_steps=" << a.max_steps << "\n";
+              << " max_steps=" << a.max_steps
+              << " obs_inflight=" << (a.obs_inflight ? 12 : 8) << "\n";
     dk::ObsState st;
+    st.obs_inflight = a.obs_inflight;
     struct Ep { double reward, steps, speed; std::string reason; bool parked, crash; };
     std::vector<Ep> eps;
     for (int e = 0; e < a.episodes; ++e) {
@@ -418,6 +435,7 @@ static int gate5(const Args& a) {
     std::cout << "[gate5] soak ctl_step_ms=" << a.ctl_step << " seconds=" << a.seconds
               << " rss0=" << rss_mb() << "MB\n";
     dk::ObsState st;
+    st.obs_inflight = a.obs_inflight;
     long ep = 0, resets = 0;
     double t0 = now_ms(), last_report = t0;
     long frames = 0;

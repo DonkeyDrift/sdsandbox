@@ -99,6 +99,9 @@ def parse_args():
     parser.add_argument("--action-jitter", type=int, default=0,
                         help="延迟抖动域随机(需配 --action-delay):每步从最近 K 个动作里均匀随机执行一个,"
                              "覆盖真实异步的时钟抖动/控制丢帧(策略动作偶发被跳过或重复)")
+    parser.add_argument("--obs-inflight", action="store_true", default=False,
+                        help="INFLIGHT 实验:观测追加策略最近 2 步输出 [a_{k-1},a_{k-2}],8→12 维;"
+                             "需配 --action-delay(死时间等价框架)")
     parser.add_argument("--seed", type=int, default=1, help="训练/出生随机种子")
     parser.add_argument("--save", default=None, help="最终模型保存路径(默认 outputs/rl_<algo>.zip)")
     parser.add_argument("--tb", default="outputs/rl_tb", help="tensorboard 日志目录")
@@ -159,7 +162,8 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
             env = StickyActionWrapper(env, hold_prob=args.action_hold_prob,
                                       hold_max=args.action_hold_max)
         if args.action_delay > 0:
-            env = ActionDelayWrapper(env, delay=args.action_delay, jitter=args.action_jitter)
+            env = ActionDelayWrapper(env, delay=args.action_delay, jitter=args.action_jitter,
+                                     obs_inflight=args.obs_inflight)
         if time_limit:
             # 本环境不自带步数上限(只 terminated 不 truncated);EvalCallback 的
             # evaluate_policy 没有步数预算,好策略永不撞墙会把评测永远挂住。
@@ -205,21 +209,45 @@ class ActionDelayWrapper(gym.Wrapper):
     队初的 None 执行零动作(sim 复位后控制即零)。注意与 StickyActionWrapper
     的区别:后者是"保持并丢弃"奇数步动作,不是延迟——本类才是延迟语义。
     jitter>0(域随机):每步从最近 jitter 个已入队动作里均匀随机执行一个,
-    覆盖真实异步的时钟抖动与控制丢帧(动作偶发被重复执行或跳过)。"""
+    覆盖真实异步的时钟抖动与控制丢帧(动作偶发被重复执行或跳过)。
+    obs_inflight=True(INFLIGHT 实验):观测追加策略最近 2 步输出
+    [a_{k-1}.steer, a_{k-1}.thr, a_{k-2}.steer, a_{k-2}.thr],8→12 维。
+    增强发生在 wrapper 层(策略视角),非 fork 层(延迟动作视角)——
+    策略要看到的是自己输出了什么,不是延迟后执行了什么。"""
 
-    def __init__(self, env, delay=1, jitter=0):
+    def __init__(self, env, delay=1, jitter=0, obs_inflight=False):
         super().__init__(env)
         self.delay = delay
         self.jitter = jitter
+        self.obs_inflight = bool(obs_inflight)
         self._buf = None
+        if self.obs_inflight:
+            n = env.observation_space.shape[0]
+            self.observation_space = gym.spaces.Box(
+                low=-np.inf, high=np.inf, shape=(n + 4,), dtype=np.float32)
 
     def _fresh(self):
         import collections
-        self._buf = collections.deque([None] * self.delay, maxlen=self.delay + (self.jitter or 0))
+        base = self.delay + (self.jitter or 0)
+        # obs_inflight 需要至少 2 个历史槽,否则 delay+jitter<2 时 a_{k-2} 恒零
+        maxlen = max(base, 2) if self.obs_inflight else base
+        self._buf = collections.deque([None] * self.delay, maxlen=maxlen)
 
     def reset(self, **kwargs):
         self._fresh()
-        return self.env.reset(**kwargs)
+        out = self.env.reset(**kwargs)  # gymnasium: (obs, info)
+        if self.obs_inflight:
+            obs, info = out
+            return self._augment(obs), info
+        return out
+
+    def _augment(self, obs):
+        """追加 [a_{k-1}, a_{k-2}](策略最近 2 步输出;不足补零)。
+        调用时机:step(a_k) 内 append(a_k) 之后,返回给决策 k+1 的观测
+        含 [a_k, a_{k-1}] —— 即任务书口径"决策 k 视角在飞指令 a_{k-1}, a_{k-2}"
+        (最新发出的在前)。C++ obs.hpp::record_action 镜像同一顺序。"""
+        a_prev, a_prev2 = inflight_pair(list(self._buf))
+        return np.concatenate([np.asarray(obs, dtype=np.float32), a_prev, a_prev2])
 
     def step(self, action):
         if self._buf is None:
@@ -233,7 +261,21 @@ class ActionDelayWrapper(gym.Wrapper):
             old = self._buf[0]
         if old is None:
             old = np.zeros_like(action)
-        return self.env.step(old)
+        out = self.env.step(old)  # gymnasium: (obs, reward, terminated, truncated, info)
+        if self.obs_inflight:
+            obs, reward, terminated, truncated, info = out
+            out = (self._augment(obs), reward, terminated, truncated, info)
+        return out
+
+
+def inflight_pair(recent):
+    """INFLIGHT 共享增广:recent 为旧→新的动作列表(step 内 append(a_k) 之后),
+    返回 [最新, 次新] = ([a_k], [a_{k-1}]),None/不足补零。
+    决策 k+1 的观测含 [a_k, a_{k-1}] ≡ 任务书"决策 k 视角在飞 [a_{k-1}, a_{k-2}"]。
+    wrapper._augment 与 inflight_record.py 复用本函数保证两侧同序。"""
+    a_prev = np.asarray(recent[-1], dtype=np.float32) if len(recent) >= 1 and recent[-1] is not None else np.zeros(2, dtype=np.float32)
+    a_prev2 = np.asarray(recent[-2], dtype=np.float32) if len(recent) >= 2 and recent[-2] is not None else np.zeros(2, dtype=np.float32)
+    return a_prev, a_prev2
 
 
 class ActorUnfreezeCallback(BaseCallback):
@@ -372,7 +414,9 @@ class PPOBC(PPO):
     def train(self) -> None:
         lam = self._current_lambda()
         if lam <= 0:
-            return super().train()
+            # 显式基类调用:resume 路径经 MethodType 绑定到 PPO 实例,self 不是
+            # PPOBC 子类实例,super() 零参形式会 TypeError
+            return PPO.train(self)
 
         # ---- PPO.train() 蓝本 + BC 项 ----
         self.policy.set_training_mode(True)
@@ -524,14 +568,30 @@ def main():
     if use_bc:
         if args.state_obs or args.algo != "ppo":
             raise SystemExit("--bc-lambda 仅支持 --vision --algo ppo")
-        if args.resume:
-            raise SystemExit("本轮 PPOBC 不支持 --resume + --bc-lambda(全新训)")
     if args.resume:
         ctor = PPO if args.algo == "ppo" else SAC
         model = ctor.load(args.resume, env=envs, tensorboard_log=args.tb, verbose=1)
         if args.lr is not None:
             model.learning_rate = args.lr  # 覆盖已存学习率(续训已收敛模型必配)
         print("[rl_train] resumed from %s lr=%s" % (args.resume, args.lr))
+        if use_bc:
+            # V3-ANCHOR: 续训 + BC 正则。先按 PPO 加载(保留全部 PPO 状态),
+            # 再绑定 PPOBC 的 BC 方法。λ=0 时 PPOBC.train() 走 super().train()
+            # 即 PPO.train(),与纯续训逐位一致(探针②)。
+            import types as _types
+            model.bc_lambda = args.bc_lambda
+            model.bc_data_dir = args.bc_data
+            model.bc_batch = args.bc_batch
+            model.bc_anneal_from = args.bc_anneal_from
+            model.bc_anneal_to = args.bc_anneal_to
+            model._bc_obs = None
+            model._bc_acts = None
+            model._bc_rng = np.random.default_rng(int(getattr(model, "seed", 0) or 0))
+            for _m in ("_current_lambda", "_ensure_bc_data", "_sample_bc_batch",
+                       "_bc_mean_loss", "train", "save"):
+                setattr(model, _m, _types.MethodType(getattr(PPOBC, _m), model))
+            print("[rl_train] PPOBC 续训: λ=%s data=%s anneal=%d→%d"
+                  % (args.bc_lambda, args.bc_data, args.bc_anneal_from, args.bc_anneal_to))
     elif use_bc:
         model = PPOBC(
             policy, envs,

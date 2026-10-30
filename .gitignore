@@ -97,4 +97,8 @@ outputs/bc_probe_montage.jpg
 # HBC(2026-10-30):1.0G mycar tub→npz 数据集随交接包流转;蒙太奇拼贴证据留本地
 outputs/bc_human_data/
 outputs/hbc_*.jpg
+# V3-ANCHOR(2026-10-31):vision3 自锚数据集随交接包流转
+outputs/bc_v3anchor/
+outputs/bc_v3anchor_probe.npz
+outputs/bc_v3anchor_probe_*montage*.jpg
 build_cpp/
