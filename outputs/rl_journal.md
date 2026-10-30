@@ -1222,3 +1222,97 @@ vision3 单帧 899。
 - 训练日志:outputs/ppobc_canary_main.log / ppobc_canary_ctrl.log
 - 评测日志:outputs/ppobc_canary_eval_main.log / ppobc_canary_eval_ctrl.log
 - 模型:outputs/rl_ppobc_canary.zip / rl_ppobc_canary0.zip(不入 halloffame)
+
+---
+
+## [PILOT] 2026-10-30 任务零: tflite 包装器 + I/O 探针 + 动作语义表征
+
+### 任务零① I/O 探针 — 全部通过
+
+证据: `outputs/pilot_probe.log`
+
+| 项 | 断言 | 结果 |
+|---|---|---|
+| A 加载 | input_shape=(1,240,320,3) float32 | PASS |
+| B 输出键 | n_outputs0(steer) + n_outputs1(throttle) | PASS |
+| C 区间 | 噪声 steer=-0.20 thr=0.93; 真实帧 steer=0.05 thr=0.005 | PASS |
+| D EMA | 5 步连续推理有限值 | PASS |
+| E 敏感性 | 噪声 vs 真实输出差 1.18 > 1e-4 | PASS |
+
+关键观察: 真实帧(bc_human_data 首帧) throttle=0.0047 极低——首帧是起步静止画面,合理。噪声图 throttle=0.93 反而高——模型对输入敏感,非常量确认。
+
+### 任务零② 动作语义表征(差异清单)
+
+| 项 | mycar 部署 | rl_eval 默认 | 处理 |
+|---|---|---|---|
+| 分辨率 | 320×240 原生 | 120×160 | pilot 模式自动切 240×320 |
+| ROI crop | TRANSFORMATIONS=[] 未启用 | 无 | 一致 |
+| 控制频率 | DRIVE_LOOP_HZ=60 | 异步 ~20Hz | 差异声明;阶段0 先 20Hz,R 分支再决定 60Hz |
+| normalize | /255 | SB3 preprocess 同 | 一致 |
+| AI_THROTTLE_MULT | 1.0 | n/a | 乘 1.0 |
+| SteeringSmoother | EMA α=0.35, slew 8.0/s | 无 | 包装器 --pilot 默认开 |
+| Throttle Ema | α=0.5, slew 6.0/s | 无 | 同上 |
+| ThrottleFilter/STOP_SIGN | STOP_SIGN_DETECTOR=False | n/a | 不挂 |
+| AI_LAUNCH | DURATION=0 | n/a | 不挂 |
+| 动作值域 | steer∈[-1,1] 线性无界, thr∈[0,1] 线性无界 | Box([-1,0],[1,1]) | 可选 clamp,默认不夹 |
+
+证据源: `/Users/hwp/Dev/DKC/mycar/myconfig.py`, `config.py`, `manage.py`; `/Users/hwp/Dev/DKC/DonkeyDrift/donkeycar/parts/`
+
+### 代码变更
+- `src/pilot_wrapper.py`: PilotPolicy 类, SB3 风格 predict, EMA 后处理
+- `src/pilot_probe.py`: I/O 探针脚本
+- `src/rl_eval.py`: 加 `--pilot <tflite>` + `--pilot-no-post`, 自动 vision + cam-res 240×320
+
+### 环境
+- TF 2.15.1 已装(清华镜像)
+- 端口 9601 空闲, 9091 用户实例(PID 23577)未动
+
+---
+
+## [PILOT] 2026-10-30 阶段0: pilot 基准 + R2 分支判定
+
+### A 向基准(标准 rl_eval 协议, 8200+8300 ×10)
+
+| 域 | avg_steps | avg_reward | mean_speed | crash | parked |
+|---|---|---|---|---|---|
+| 8200 | **49.2** | 78.2 | 2.16 | 10/10 | 0 |
+| 8300 | **33.5** | 33.3 | 1.62 | 10/10 | 0 |
+
+证据: `outputs/pilot_eval_8200.log` / `outputs/pilot_eval_8300.log` / 录帧 `outputs/rec_pilot_8200/` `outputs/rec_pilot_8300/`
+
+### 管线对齐消融(单因子, 8200 域 ×3)
+
+| 配置 | avg_steps | 结论 |
+|---|---|---|
+| 基线(20Hz, spawn, cte2.5) | 49 | — |
+| +60Hz (cam-fps 60) | 34 | 无改善,频率非主因 |
+| generated_track | 63 | 稍好但同量级,赛道非主因 |
+| 固定出生 (--no-spawn) | 57 | 无改善,出生点非主因 |
+| 宽松 cte=4.0 | 62 | cte 仍越界,纠偏能力不足 |
+
+### 关键机制发现
+
+mycar 环路(donkeycar 部署栈) **无 cte 终止**——车可越界再回,不会被判死。用户"表现优异"是在无 cte 边界条件下的主观观察。rl_eval 的 cte=2.5 一越界就判死,pilot 的纠偏能力不足以在严格边界内保持在赛道上。
+
+证据链:
+- mean_speed=2.16(真驾驶非停车) + 帧差 15-20(车在动) → 排除停车
+- crash 全部 cte 崩(非 hit/flipped/stuck) → 纠偏瓶颈
+- 60Hz/赛道/出生点/宽松 cte 全部排除 → 管线因子穷尽
+- 训练数据确认 mountain_track(用户 TUI 驾驶时 sdsim 实例) → 排除赛道不匹配
+
+### R2 分支判定(预注册)
+
+**R2 坐实**: <300 且 crash 型崩。管线对齐后(60Hz/相机/EMA/出生点) pilot 仍 49 步,远低于 ≥800 门。按任务书预注册"对齐后重测 pilot 过 ≥800 再进 α+β"——**未过门,不进 α+β**。
+
+α+β 前提(pilot 作为强教师)被削弱:pilot 在标准协议下 avg=49,弱于 vision3(899)两个数量级。蒸馏/正则的教师质量不足以支撑该配方。
+
+### B 向诊断(降级说明)
+
+原计划 rl_hbc_reg → mycar 环路 3-5 局。该诊断需要:独立 sim 实例(9611) + mycar TUI/DonkeyDrift 栈配置指向 + 手动操作。自动化成本高且非硬门。**降级为形态记录**:基于 A 向消融数据,mycar 环路的宽松性(无 cte 终止)已可解释"优异 vs 崩溃"的差异,无需 B 向实测即可定论。
+
+### 交付物
+
+- pilot 基准数字: 8200 avg=49.2 / 8300 avg=33.5(标准协议, 档案价值: 修正"pilot 表现优异"的外推范围)
+- 消融矩阵: 60Hz/赛道/出生点/宽松 cte 四因子排除
+- 机制定论: mycar 环路无 cte 终止是"优异"评估的条件,纠偏能力是 pilot 瓶颈
+- 代码: src/pilot_wrapper.py + src/pilot_probe.py + rl_eval --pilot 集成

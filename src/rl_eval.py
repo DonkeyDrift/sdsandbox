@@ -185,6 +185,10 @@ class RecorderWrapper(gym.Wrapper):
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a trained PPO policy against DonkeySim")
     parser.add_argument("--model", default="outputs/rl_ppo.zip", help="模型路径")
+    parser.add_argument("--pilot", default=None,
+                        help="pilot tflite 路径(--model 的替代:用 PilotPolicy 包装器评测)")
+    parser.add_argument("--pilot-no-post", dest="pilot_post", action="store_false", default=True,
+                        help="禁用 mycar 环路后处理(EMA 平滑),裸模型输出")
     parser.add_argument("--episodes", type=int, default=3, help="评测 episode 数")
     parser.add_argument("--max-steps", type=int, default=1500, help="单 episode 最大步数(截断)")
     parser.add_argument("--port", type=int, default=9091, help="模拟器端口(连接已有实例时)")
@@ -232,6 +236,14 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # pilot 模式:强制视觉观测,默认 cam-res 对齐 pilot 原生 (240,320)
+    if args.pilot:
+        args.state_obs = False
+        if args.cam_res == (120, 160):  # 用户未显式指定,用 pilot 原生分辨率
+            args.cam_res = (240, 320)
+        print("[rl_eval] pilot 模式: vision=on cam_res=%s pilot_post=%s" %
+              (args.cam_res, args.pilot_post))
+
     conf = {
         "exe_path": args.sim_path if args.launch_sim else "remote",
         "host": "127.0.0.1",
@@ -271,8 +283,16 @@ def main():
         env = RecorderWrapper(env, args.record, keep=args.record_frames)
         print("[rl_eval] 现场录帧开启 -> %s (每局末 %d 帧)" % (args.record, args.record_frames))
     try:
-        model = PPO.load(args.model)
+        if args.pilot:
+            from pilot_wrapper import load_pilot
+            model = load_pilot(args.pilot, mycar_post=args.pilot_post)
+            print("[rl_eval] PilotPolicy 已加载: %s (mycar_post=%s)" % (args.pilot, args.pilot_post))
+            print("[rl_eval] pilot meta: %s" % model.meta)
+        else:
+            model = PPO.load(args.model)
     except Exception:
+        if args.pilot:
+            raise  # pilot 加载失败不 fallback
         try:
             from stable_baselines3 import SAC
             model = SAC.load(args.model)
