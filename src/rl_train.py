@@ -12,6 +12,7 @@
 import argparse
 import glob
 import os
+import types
 
 import numpy as np
 import torch as th
@@ -378,7 +379,12 @@ class PPOBC(PPO):
         # 注:resume 路径下 self 是 MethodType 绑到 PPO 实例的对象,super() 二参形式
         # 会 TypeError(super(type, obj): obj must be an instance)——与 train() 同款,
         # 显式走 PPO.save。金丝雀 zip 丢失案(v3anchor_main 110k 崩溃存档失败)。
+        # resume 绑定的方法(train/save/_current_lambda/_ensure_bc_data 等)必须排除:
+        # cloudpickle 对 MethodType 按 __self__ 拉进整个实例,绕过 SB3 的按名排除,
+        # 把 env(SubprocVecEnv→mp.Process→AuthenticationString)拖进序列化直接崩
+        # (v3anchor_main_full 125k ckpt 案)。这些方法每次 resume 都重新绑定,无需入 zip。
         exclude = list(exclude or []) + ["_bc_obs", "_bc_acts"]
+        exclude += [k for k, v in self.__dict__.items() if isinstance(v, types.MethodType)]
         return PPO.save(self, path, exclude=exclude, include=include)
 
     def _current_lambda(self):
