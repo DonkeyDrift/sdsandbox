@@ -1104,3 +1104,69 @@ vision3 单帧 899。
 - 客户端侧(p95 0.218ms/超界 0%)不再是任何残差的借口;crash 残差=策略在该
   死时间+课程下的固有撞车率(与 P1 消融定论一致)。
 - K2.8 复核点:逐局日志+本条目+性能量三件套。
+
+## 2026-10-30 [HBC] 人驾 BC 单轮实验:双味验收 ~30 步 cte 终止,判定树分支②——BC 轨永久封盘
+
+### 数据链(mycar tub→npz,observe_player 绑定三轮全零后放弃,不回头修)
+- 转换器 `src/hbc_tub_to_npz.py`:root(5162 帧,删除洞 2537-2950 自然断段)+
+  tub_2(2722 帧),manifest deleted_indexes 过滤 → `outputs/bc_human_data/`
+  bc_00000..00010.npz(**7884 对/11 局段/240×320 uint8**)+ data_card.json。
+- 数据卡:**|steer|>0.3=36.5%(root)/41.1%(tub2)**;**throttle>0.2=97.6%/99.4%,
+  油门 10 桶直方图 [137,1,2,1,3,2,1,21,53,7663](均值 0.93)**——与 champion 脉冲式
+  0.247/37.8% 构成差异化实证;负油门 123 帧全在被删段,保留帧 0 个。
+- 拼贴:outputs/hbc_mycar_{root,tub2,mycar}_montage.jpg。
+
+### 工具链修复(本轮改动)
+- `src/bc_train.py`:BCNet/BCCatNet 入参化 in_hw、main 从数据推断 h,w、导出 Dummy
+  观测空间 (3,h,w);overfit 探针阈 1e-3→5e-3(内联注明:240×320+硬帧加权 batch
+  损失平台 ~2e-3,实测 4.84→0.0017 后 0.0016-0.0021 震荡)。探针 PASS。
+- `src/rl_eval.py`:_load_bc_cat 原硬编码 (3,120,160) → 从 zip data JSON 读
+  observation_space(base64+unpickle),240×320 checkpoint 正常加载。
+
+### 双味训练(各 25 epoch,按局段 90/10 切分,train 6884/val 1000)
+- `outputs/rl_hbc_reg.zip`:val steerMAE 0.1834 / hard 0.2597 / thr 0.0447
+- `outputs/rl_hbc_cat.zip`:val steerMAE 0.1730 / hard 0.2756 / thr 0.0753
+- 数据内拟合(诊断):reg 在数据上 steer MAE=0.048/corr=0.959——管线与容量无问题。
+
+### 验收(新门口径:mean_speed≥1.0 进展门 + 末16帧 L1<2.0 判 parked;--record 全程)
+| 域 |味 | valid | avg_steps | avg_reward | mean_speed | crash |
+|---|---|---|---|---|---|---|
+| 8200 | reg | 10/10 | 30.7 | 29.7 | 1.64 | 10/10 |
+| 8300 | reg | 9/10(1 parked) | 34.7 | 35.6 | 1.73 | 9/9 |
+| 8200 | cat | 10/10 | 30.5 | 28.4 | 1.71 | 10/10 |
+| 8300 | cat | 10/10 | 30.5 | 31.9 | 1.61 | 10/10 |
+- 金丝雀 8200×2:reg 24.0 步/speed 1.42、cat 20.5 步/speed 1.34——过 ≥1.0 初门
+  (非蠕行)但同签名。
+- 逐局:全部 18-60 步内 cte 2.5-3.0 终止(hit=none/flipped=False/stuck=0),
+  reward 4.4-128.1 与步数成正比(量级正常,非停车 ≈0)。
+- **laps=1(reg8300/cat8300)按假圈定性**:局最长 60 步不可能完圈,系 spawn 过
+  起跑线误计,不作为成绩。
+- 对照:vision3 单帧基线 899.3、门 1500。
+
+### 诊断链(排除法,支撑判定)
+1. SB3 obs_to_tensor 自动 HWC→CHW(HWC/CHW 输入预测逐点一致)——评测通路无 bug。
+2. 数据内拟合极好(上)——模型/管线没问题。
+3. 开局帧预测合理(steer 0.02-0.41/throttle 0.82-0.98)——非乱输出。
+4. `--no-spawn` 固定出生点对照:**仍 26.2 步崩**——非随机出生偏移所致。
+5. 图像分布:train mean RGB [72,85,92];eval ep01 [65,78,88] 接近、ep00
+   [102,110,113] 偏亮(不同路段),std 同量级;**最近邻 L1:eval 首末帧 vs 训练
+   参照 25.1-27.4 < 训练集内部帧间中位 42.2**——eval 帧在训练分布内,无 gross 错位。
+6. 录帧帧差 14.68/13.95 ≫ parked 阈 2.0、zero_frames=0、mean_speed 1.3-3.1
+   ——真在动,非停车。
+7. **蒙太奇视觉抽看受阻如实记录**:两个子代理均无图像输入能力(429 配额+模型
+   无 image_in),定量替代:帧差/位移拟合(三局 dx 0→-3~-9px 持续横移)、
+   ep01 路面像素第 12 帧起 0.64→0.03(冲出赛道形态)、meta 遥测 cte≥2.5 一致。
+   **蒙太奇路径留 K2.8/用户人工复核**:
+   outputs/rec_hbc_reg_8200/ep00_seed8200_crash/montage.jpg、
+   outputs/rec_hbc_reg_8200/ep01_seed8201_crash/montage.jpg、
+   outputs/rec_hbc_cat_8200/ep06_seed8206_crash/montage.jpg。
+
+### 判定:分支②「双味都蠕行/跑偏」→ 结论升级,BC 轨永久封盘
+- 双味双域一致 ~30 步、crash 10/10、**非蠕行**(mean_speed 1.6-1.7,进展门全过)
+  = **跑偏型失败**(与既往蠕行签名不同,是新数据+新配方下的同归殊途)。
+- 结论升级:**数据分布(人驾平滑油门/36-41% 硬转向)与损失函数(MSE/分类头)
+  都不是根因——分布鲁棒性层为最终约束**。与三口味 BC(蠕行 238/DAgger 恶化/
+  分类头蠕行 340)及视觉 RL 三重奖励两难合流,BC 轨**永久封盘**(单轮规则,
+  不进 DAgger)。
+- 视觉轨最终档案不变:vision3 单帧 899.3;HBC 产物(rl_hbc_reg/cat.zip+
+  bc_human_data)归档备查,不入 halloffame。

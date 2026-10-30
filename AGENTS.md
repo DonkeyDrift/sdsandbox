@@ -79,8 +79,9 @@
 - 多训练并行必须 `--run-name` 隔离(best/ckpt 目录),端口分段 9101+ / 9201+。
 - **模型交接约定(2026-10-30)**:RL 模型二进制(`outputs/rl_*.zip`、`rl_best_*`、`rl_ckpt_*`、
   `rl_halloffame/`、`rl_ppo_ckpt/`、`rl_export/`,约 5.8G)与 BC 数据集(`outputs/bc_data`、
-  `bc_data_dagger`、`bc_data_probe.npz`、`bc_human_probe`、`bc_probe_montage.jpg`,约 2.7G;
-  `bc_human_data` 由 hbc_record 正式录制时落盘)**不进 git**(remote 为 GitHub,单文件 >100MB 拒收),
+  `bc_data_dagger`、`bc_data_probe.npz`、`bc_human_probe`、`bc_probe_montage.jpg`、
+  `bc_human_data`(2026-10-30 落盘,mycar tub→npz 7884 对/1.0G),合计约 3.7G)**不进 git**
+  (remote 为 GitHub,单文件 >100MB 拒收),
   但**必须随交接包(7z 全仓快照)流转**——重建包 = git 跟踪内容 + `.git` + `sdsim/*.csproj`+`sln` +
   上述模型/数据集;解包后 `--resume outputs/rl_<模型>`、`bc_train.py --data outputs/bc_data[_dagger]`
   直接可用,`rl_export/` 的 ONNX 供 C++ 侧部署。tb/日志/录屏(rec_*)/回放(rl_replay_*)/

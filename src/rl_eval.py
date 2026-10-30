@@ -41,30 +41,38 @@ LEVEL_TO_ENV = {
 
 def _load_bc_cat(path):
     """BC 分类头模型加载:action_net=ExpectDecode 无法 strict 灌入线性骨架,
-    构造骨架后挂解码头再 load_state_dict(strict=False)。"""
+    构造骨架后挂解码头再 load_state_dict(strict=False)。观测空间从 zip 的
+    data JSON 解出(硬编码 120×160 会在 240×320 模型上 shape mismatch)。"""
     import io
+    import json
+    import pickle
     import zipfile
 
     import torch
     from stable_baselines3 import PPO
     from gym_donkeycar.envs.bc_decode import ExpectDecode
 
+    with zipfile.ZipFile(path) as z:
+        data = json.loads(z.read("data"))
+        import base64
+        obs_space = pickle.loads(base64.b64decode(
+            data["observation_space"][":serialized:"]))
+        name = "policy.pth" if "policy.pth" in z.namelist() else "parameters"
+        params = torch.load(io.BytesIO(z.read(name)), map_location="cpu",
+                            weights_only=False)
+
     class _D(gym.Env):
-        observation_space = gym.spaces.Box(0, 255, (3, 120, 160), dtype=np.uint8)
+        observation_space = obs_space
         action_space = gym.spaces.Box(
             np.array([-1., 0.], dtype=np.float32), np.array([1., 1.], dtype=np.float32))
 
         def reset(self, **k):
-            return np.zeros((3, 120, 160), np.uint8), {}
+            return np.zeros(obs_space.shape, obs_space.dtype), {}
 
         def step(self, a):
-            return np.zeros((3, 120, 160), np.uint8), 0., False, False, {}
+            return np.zeros(obs_space.shape, obs_space.dtype), 0., False, False, {}
 
     model = PPO("CnnPolicy", _D(), verbose=0)
-    with zipfile.ZipFile(path) as z:
-        name = "policy.pth" if "policy.pth" in z.namelist() else "parameters"
-        params = torch.load(io.BytesIO(z.read(name)), map_location="cpu",
-                            weights_only=False)
     model.policy.action_net = ExpectDecode(model.policy.features_dim)
     model.policy.load_state_dict(params, strict=False)
     return model
