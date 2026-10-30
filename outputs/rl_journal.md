@@ -1430,3 +1430,69 @@ mycar 环路(donkeycar 部署栈) **无 cte 终止**——车可越界再回,不
   诊断脚本复现"bad attr: env/train/save/_current_lambda/_ensure_bc_data"五连定位。
 - 修复:save 排除 __dict__ 全部 MethodType 属性;SubprocVecEnv 在位 SAVE OK+reload OK。
 - 主臂从 vision3 重发车(丢 24k 步);对照臂(纯 PPO 无绑定)未受影响持续在跑。
+
+## [INFLIGHT] gate4 四局域收官 + 预注册判定(2026-10-31 04:00)
+
+### gate4 全量结果(全部 ctl_step 20ms 量化协议, max_steps 2500, C++ 客户端 dkcpp)
+
+| 局域 | 模型 | 跑满/局数 | crash | Wilson 95% | reward (全) | mean_speed | PARKED标记 |
+|---|---|---|---|---|---|---|---|
+| 8100×50 | main (12维) | 50/50 | 0 | [0, 7.1%] | 1988-2292 均2143.7 (valid24: 2197.1) | 0.996 (0.925-1.059) | 26 (边界误报) |
+| 8200×25 | main | 25/25 | 0 | [0, 13.3%] | 2036-2227 均2138.2 (valid11: 2195.5) | 0.996 | 14 (误报) |
+| 8100×50 | ctrl (8维) | 50/50 | 0 | [0, 7.1%] | 1330-1691 均1519.5 | 0.742 (0.649-0.833) | 50 (全误报) |
+| 8200×25 | ctrl | 25/25 | 0 | [0, 13.3%] | 1347-1688 均1525.9 | 0.744 | 25 (全误报) |
+
+- 日志:outputs/inflight_gate4_{8100x50,8200x25}_{main,ctrl}.log;合并 main 0/75
+  Wilson[0,4.9%],ctrl 同。150 局**全部 "-> max_steps" 终止,零 cte/hit 崩**。
+- PARKED 全部为 speed<1.0 门边界误报(reward>1300 自证真驾驶;停车局 reward≈0
+  已有定标)。C++ 端无帧差检测,判定 crash 按终止原因不受影响。
+- 双臂配方核验:两跑日志头 spawn/seed/state 一致,0 处 bc 参数——纯 PPO,
+  **唯一差异 = obs 维度(12 vs 8,in-flight a_{k-1}+a_{k-2})**。
+- 遗留观察:main 偶数 seed mean_speed<1.0/奇数>1.0(lateral_offsets 按奇偶分侧
+  出生,单侧略慢);laps 字段恒 0(C++ 端未接 lap 计数,不影响判定)。
+- ONNX:outputs/rl_export/inflight_{main,ctrl}.onnx(导出时 16 组随机观测与 SB3
+  逐点一致已验)。
+
+### 封箱对照(20261019 delay20j3, 同口径同客户端)
+- 8100×50: avg 1148(仅 valid 局) / crash 93.3% Wilson[82.1,97.7]
+- 8200×25: avg 1590 / crash 73.9% [53.5,87.5]
+
+### 预注册判定(逐条对照任务书两分叉)
+1. **① crash 分离条件:压倒性满足**——main 0/50,CI[0,7.1] 与封箱 [82.1,97.7]
+   零重叠,点估计 0 ≤ 70%。
+2. **③ 归因检查触发:obs 增强的 crash 归因否决**——ctrl(无 obs 增强)同配方
+   从头重训同样 0/75 crash。按预注册"若对照臂也大降,结论按②收窄"。
+3. **② 收窄结论:信息成分排除**——crash 下降不能归因于在飞观测;
+   封箱 93.3% 是 delay20j3 那条 resume 谱系(自 best_model 续训 1M)的产物。
+
+### 数据揭示的更大事实(如实上报,改判建议留监控方裁量)
+- **"墙=纯控制精度极限"前提被对照臂证伪**:20ms 量化异步 + C++ 客户端在正常
+  从头重训下 crash 瓶颈不存在(双域 0/150 局全跑满)。异步轨实质已通,
+  delay20j3 的 crash 墙是谱系缺陷而非协议极限。
+- **obs 增强的真实贡献 = 提速**:main vs ctrl mean_speed +34%(0.996 vs 0.742)、
+  reward +41%(2143.7 vs 1519.5),crash 双零——是提速/效率因子,非 crash 因子。
+- 预注册"区间重叠→异步轨永久关闭"条款的适用前提(墙=精度极限)未成立;
+  按数据的状态改判建议:**异步轨=已通,obs 增强=已验证的提速因子**
+  (若要更高吞吐/速度可叠加),是否重开后续方向由监控方裁量。
+- halloffame:20261031-INFLIGHT_main-1M-8100x50-crash0-reward2197.zip +
+  20261031-INFLIGHT_ctrl-1M-baseline.zip。
+
+## [V3-ANCHOR] 全量中段:主臂稳定 / 对照臂止损重启(2026-10-31 04:00)
+
+### 主臂(λ=0.1 自锚, lr 3e-4 续训)——稳定,继续
+- 重发车(063d867 save 修复后)至 ~130k(跑程 ~30k):ep_len 167-191 平台,
+  峰值回落 11%(<30% 止损线);ep_rew 149→202 爬升中;单位步奖励 ~1.15。
+- 无过热签名,按配方默认 lr 继续跑 200k。
+
+### 对照臂(λ=0 纯续训, lr 3e-4 默认)——触发止损
+- 至 ~189k(跑程 ~88k):ep_len 从 resume 基线 202 崩到 62.5(-69%);
+  last40 内自局部峰 96.5 单调跌至 62.5(-35%)——**命中预注册纪律
+  "ep_len/ep_rew rollout 内单调跌 >30% 即止损改 1e-4"**。
+- 止损动作:kill(ckpt ppo_125230/150230/175230_steps.zip 保留于
+  outputs/rl_ckpt_v3anchor_ctrl_full/,崩溃轨迹完整在 outputs/
+  rl_run_v3anchor_ctrl_full.log)。同配方从头对照按协议改 **lr 1e-4** 重启:
+  `--resume rl_vision3.zip --lr 1e-4 --steps 200000 --seed 2 --port-base 9531
+  --run-name v3anchor_ctrl_lr1e4`,04:00 发车,首 rollout ep_len 159。
+- 归因备注:主臂(lr 3e-4+锚)稳定 vs 对照(lr 3e-4 无锚)崩——**"锚=信任域
+  防崩"机制假设的中段证据**;重启的 lr 1e-4 对照回答"降 lr 能否单独替代锚"。
+  lr 不对称系预注册止损条款所致,终报如实披露。
