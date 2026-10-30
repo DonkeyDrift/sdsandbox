@@ -1408,3 +1408,25 @@ mycar 环路(donkeycar 部署栈) **无 cte 终止**——车可越界再回,不
   全部 ctl_step 20ms 量化协议,--obs-inflight 仅主臂。
 - 判定(预注册):8100 crash 率点估计 ≤70% 或 Wilson CI 与封箱 [82.1,97.7]
   不重叠 → 信息假设成立;重叠 → 异步轨永久关闭;对照臂同测分离重训方差。
+
+### [INFLIGHT] gate4 主臂 8100×50 首报(2026-10-31 02:15,outputs/inflight_gate4_8100x50_main.log)
+- **50/50 局全部跑满 2500 步,crash 0**;全部 "-> max_steps" 终止(无一 cte/hit 崩)。
+  reward 1988-2292(均值 valid 2197)——真驾驶非停车。对照封箱 delay20j3:8100×50
+  avg 1148 / crash 93.3% Wilson[82.1,97.7] → **0/50 的 Wilson 95% 上界 ≈7.1%,
+  与封箱 CI 完全不重叠,预注册判定①的 crash 分离条件以压倒性余量满足**
+  (最终定性待对照臂③归因)。
+- PARKED 标记 26/50 为 1.0 进展门边界伪报:该批局 mean_speed 0.94-0.99 贴线,
+  reward ~2100(停车局 reward≈0 已有定标)——C++ 端无帧差检测,仅 speed 门,
+  边界慢速局被误标;对 crash 判定无影响(判定按终止原因,全部 max_steps)。
+- 系统性模式:偶数 seed mean_speed<1.0 / 奇数 >1.0(lateral_offsets 按 seed 奇偶
+  分侧出生,单侧略慢)——记录备查,不阻塞。
+- halloffame 快照(防覆盖教训):20261031-INFLIGHT_main-1M-8100x50-crash0-reward2197.zip
+  + 20261031-INFLIGHT_ctrl-1M-baseline.zip。
+
+### [V3-ANCHOR] 全量主臂首跑 125k 崩溃与修复(063d867)
+- CheckpointCallback 首个 25k ckpt 即崩:cloudpickle 对 resume 绑定的 MethodType
+  (train/save/_current_lambda/_ensure_bc_data)按 __self__ 拉进整个 PPO 实例,
+  绕过 SB3 按名排除 env → SubprocVecEnv → mp.Process → AuthenticationString。
+  诊断脚本复现"bad attr: env/train/save/_current_lambda/_ensure_bc_data"五连定位。
+- 修复:save 排除 __dict__ 全部 MethodType 属性;SubprocVecEnv 在位 SAVE OK+reload OK。
+- 主臂从 vision3 重发车(丢 24k 步);对照臂(纯 PPO 无绑定)未受影响持续在跑。
