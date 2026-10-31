@@ -72,6 +72,9 @@ def parse_args():
                              "并同罚 crash_penalty(默认 0=关;P3 用 10)")
     parser.add_argument("--no-progress-dist", type=float, default=1.0,
                         help="无进展判定的窗内位移下限(米,默认 1.0)")
+    parser.add_argument("--speed-bonus", type=float, default=0.0,
+                        help="FASTSAFE 速度杠杆(奖励速度项):每步 reward += k*max(forward_vel,0)。"
+                             "默认 0=不包装不加回调,与旧行为逐位一致(保护历史基线);流 C 用 0.5")
     parser.add_argument("--img-enc", default="none", help="无图像观测时的 cam_config img_enc(默认 none)")
     parser.add_argument("--time-step", type=float, default=0.05, help="同步步进步长(秒)")
     parser.add_argument("--spawn", dest="spawn", action="store_true", default=True, help="随机出生到赛道节点(默认)")
@@ -165,6 +168,8 @@ def make_env(rank: int, args, spawn_cfg, headless, img_enc, time_limit=None):
         if args.action_delay > 0:
             env = ActionDelayWrapper(env, delay=args.action_delay, jitter=args.action_jitter,
                                      obs_inflight=args.obs_inflight)
+        if args.speed_bonus > 0:
+            env = SpeedBonusWrapper(env, k=args.speed_bonus)  # FASTSAFE 速度杠杆(默认不包装)
         if time_limit:
             # 本环境不自带步数上限(只 terminated 不 truncated);EvalCallback 的
             # evaluate_policy 没有步数预算,好策略永不撞墙会把评测永远挂住。
@@ -277,6 +282,72 @@ def inflight_pair(recent):
     a_prev = np.asarray(recent[-1], dtype=np.float32) if len(recent) >= 1 and recent[-1] is not None else np.zeros(2, dtype=np.float32)
     a_prev2 = np.asarray(recent[-2], dtype=np.float32) if len(recent) >= 2 and recent[-2] is not None else np.zeros(2, dtype=np.float32)
     return a_prev, a_prev2
+
+
+class SpeedBonusWrapper(gym.Wrapper):
+    """FASTSAFE 速度杠杆(任务书三选一之 (i) 奖励速度项):
+    每步 reward += k * max(forward_vel, 0)。forward_vel 取自 fork step info
+    (米/秒,前向分量;倒车不加分)。仅 --speed-bonus >0 时插入,默认不包装——
+    与旧行为逐位一致,保护全部历史基线可复现性。"""
+
+    def __init__(self, env, k=0.5):
+        super().__init__(env)
+        self.k = float(k)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        fv = float(info.get("forward_vel", 0.0) or 0.0)
+        if fv > 0.0:
+            reward = reward + self.k * fv
+        return obs, reward, terminated, truncated, info
+
+
+class SpeedTrackCallback(BaseCallback):
+    """FASTSAFE Pareto 轨迹:每 interval 环境步打印 (mean_speed, crash, ep_len, ep_rew)
+    窗口聚合——从 infos 读 forward_vel(逐步)与 VecMonitor episode 终止统计,
+    不起 eval env、零额外 sim 开销。crash 判定:episode 结束且 SB3 写入的
+    info['TimeLimit.truncated'] 为假(SubprocVecEnv 每步都写该键)。
+    同时给金丝雀门(ep_len ≥ 对照 80%)提供直接可读的 stdout 口径。"""
+
+    def __init__(self, interval=50000, bonus_k=0.0):
+        super().__init__()
+        self.interval = interval
+        self.bonus_k = bonus_k
+        self._fv_sum, self._fv_n = 0.0, 0
+        self._eps, self._crash = 0, 0
+        self._ep_lens, self._ep_rews = [], []
+        self._next_report = interval
+
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", []):
+            fv = info.get("forward_vel")
+            if fv is not None:
+                self._fv_sum += float(fv)
+                self._fv_n += 1
+            ep = info.get("episode")
+            if ep is not None:
+                self._eps += 1
+                self._ep_lens.append(float(ep.get("l", 0)))
+                self._ep_rews.append(float(ep.get("r", 0)))
+                if not info.get("TimeLimit.truncated", False):
+                    self._crash += 1
+        if self.num_timesteps >= self._next_report:
+            ms = self._fv_sum / max(1, self._fv_n)
+            mean_len = float(np.mean(self._ep_lens)) if self._ep_lens else 0.0
+            mean_rew = float(np.mean(self._ep_rews)) if self._ep_rews else 0.0
+            print("[FASTSAFE] step=%d mean_speed=%.3f eps=%d crash=%d crash_rate=%.3f "
+                  "ep_len=%.1f ep_rew=%.1f k=%.2f"
+                  % (self.num_timesteps, ms, self._eps, self._crash,
+                     self._crash / max(1, self._eps), mean_len, mean_rew, self.bonus_k),
+                  flush=True)
+            self.logger.record("speed/mean_speed", ms)
+            self.logger.record("speed/crash_rate", self._crash / max(1, self._eps))
+            self.logger.record("speed/ep_len", mean_len)
+            self._fv_sum, self._fv_n = 0.0, 0
+            self._eps, self._crash = 0, 0
+            self._ep_lens, self._ep_rews = [], []
+            self._next_report += self.interval
+        return True
 
 
 class ActorUnfreezeCallback(BaseCallback):
@@ -638,6 +709,10 @@ def main():
     ckpt_freq = max(1, 25000 // args.envs)
     callbacks = [CheckpointCallback(save_freq=ckpt_freq, save_path="outputs/rl_ckpt_%s/" % args.run_name,
                                     name_prefix=args.algo)]
+    if args.speed_bonus > 0:
+        callbacks.append(SpeedTrackCallback(interval=50000, bonus_k=args.speed_bonus))
+        print("[rl_train] FASTSAFE speed bonus k=%.2f,每 %d 步打印 (mean_speed, crash) 轨迹"
+              % (args.speed_bonus, 50000))
     if args.eval_envs > 0:
         # 评测环境限时 2000 步(100s 仿真):600 步上限会被饱和型策略打满无法区分,
         # 且 evaluate_policy 无步数预算必须有上限兜底

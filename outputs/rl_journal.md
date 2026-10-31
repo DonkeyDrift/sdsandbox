@@ -1556,3 +1556,90 @@ mycar 环路(donkeycar 部署栈) **无 cte 终止**——车可越界再回,不
   outputs/rl_halloffame/20261031-V3ANCHOR_ctrl_lr1e4-200k-8200x774-8300x875-newgate.zip
 - vision3 档案定格问题:899.3(旧口径)按字面维持;新口径下档案最佳现为
   ctrl_lr1e4 773.6/875.0。归属裁量留监控方。
+
+## [FASTSAFE]+[DURAB] 发车与探针/金丝雀中段(2026-10-31 21:30)
+
+### [FASTSAFE] 实现与探针(全绿)
+- src/rl_train.py 新增 `--speed-bonus`(默认 0=不包装,门控保护历史基线):
+  SpeedBonusWrapper(每步 reward+=k·max(fv,0),插在 ActionDelay 后 TimeLimit 前)
+  + SpeedTrackCallback(每 50k 步打印 [FASTSAFE] 行:mean_speed/crash/ep_len/ep_rew,
+  读 infos 的 forward_vel 与 VecMonitor episode,零额外 sim)。
+- 探针三件套:① mock 算术精确(fv=2→r=2.0,fv<0 不加分,k=0 等价);
+  ② 真实单环境 55k 实跑:step=50000 mean_speed=1.136 eps=637 ep_len=78.5
+  ep_rew=97.7(1.24/步);同配方 INFLIGHT main 无 bonus @47k=34.6/64.3(0.54/步),
+  差 +0.70/步 ≈ 预测 k·v=0.57 ✓;③ 默认路径回归:run B 2048 步完整跑通,
+  模型可加载、TB 在位(speedprobe_off_1)。
+- 教训(新):SubprocVecEnv 的 sim 会继承 stdout 管道 fd,python 退出后 sim 孤儿
+  占着管道 → 后台跑训练输出必须重定向到文件,不能 `| tail`。
+
+### [FASTSAFE] 训练发车 + 200k 金丝雀门通过
+- 命令(镜像 INFLIGHT main + 唯一杠杆):`--run-name fastsafe --envs 4
+  --eval-envs 0 --port-base 9641 --steps 1000000 --action-delay 1
+  --action-jitter 3 --obs-inflight --speed-bonus 0.5 --seed 1`,
+  日志 outputs/fastsafe_train.log,run-name tb=fastsafe_1。
+- 金丝雀(预注册 ep_len ≥ INFLIGHT main 同期 85.8×0.8=68.6):
+  **step=200000 ep_len=88.0 ≥ 68.6 通过**(绝对值亦超 INFLIGHT 同期 85.4)。
+- Pareto 轨迹(训练窗,每 50k):speed 0.693→1.073→1.051→0.895→0.881→0.876;
+  ep_len 75→59.8→65.9→88→146→209(350k)。速度尚未推起,终验见分晓。
+
+### [DURAB] 中段数据(3/5 跑完)
+| 跑 | 模型 | 域 | valid | parked | avg_steps | avg_reward | speed | laps |
+|---|---|---|---|---|---|---|---|---|
+| D1 | vision3 | 8400×10 | 2/10 | 8 | 687.5 | 690.5 | 1.376 | 0 |
+| D2 | ctrl | 8400×10 | 9/10 | 1 | 340.8 | 560.8 | 2.226 | 7 |
+| D5 | ctrl | 8200×10 复跑 | 9/10 | 1 | **291.7** | 435.1 | 2.206 | 5 |
+- D5 vs 历史 ctrl@8200(773.6/1238.5):**-62%**——+13.5% 单点误差棒巨大;
+  注意本跑与流 C 训练(4 sim)+D3 并发,CPU 负载是混杂因子,终报注明,
+  视判定需要可补干净复跑。
+- 8400 域配对(同种子逐局):ctrl 赢 8/10 种子(含 vision3 8 局 parked 的局),
+  但按预注册 valid-only avg 口径 vision3 690.5(n=2) > ctrl 560.8(n=9)——
+  口径敏感性记录在案,终报两口径并列。
+- 证据路径:outputs/durab_{v3,ctrl}_8400.log / durab_v3_8500.log(跑中)/
+  durab_ctrl_8200var.log;录帧 outputs/rec_durab_*/。
+
+## [FASTSAFE] 终验判定 + [DURAB] 五跑完整数据(2026-10-31 深夜)
+
+### [FASTSAFE] gate4 终验(C++ 试验台,20ms 量化协议,--obs-inflight)
+- ONNX: outputs/rl_export/fastsafe.onnx,16 组随机观测与 SB3 确定性输出一致。
+- **8100×50**: valid 49/50(1 PARKED: seed8144 56步 cte),avg_steps **2500.0 打满**,
+  avg_reward 2229.74,mean_speed 1.108,crash **0/50 Wilson95 [0.0, 7.1]**,laps 0。
+- **8200×25**: valid 25/25,avg_steps 2500.0,avg_reward 2221.05,mean_speed 1.108,
+  crash **0/25 Wilson95 [0.0, 13.3]**,laps 0。
+- 对照封箱 delay20j3: 8100×50 avg 1148 / crash 93.3%[82.1,97.7] @1.79;
+  8200×25 avg 1590 / 73.9%[53.5,87.5]。本次 crash CI 与封箱 CI **完全不重叠**。
+- **预注册落位: 分叉③**(mean_speed 1.108 < 1.5,速度推不上 → 速度带系策略内生选择)。
+  门 A/A+ 均未达(speed 不足);分叉②不适用(crash 未超 20%)。
+- 定性记录: speed-bonus 0.5 单杠杆把 crash 从 93.3% 压到 0%(安全侧巨幅改善),
+  速度从 INFLIGHT main ~1.0 仅微升至 1.108,未到 1.5 带——"快且零撞"前沿
+  在本配方下停在 ~1.1 速度带。训练窗终 speed 1.044 与 eval 1.108 自洽,
+  非评测口径伪影。20ms 死时间轨按任务书分叉③入档收束。
+- 证据: outputs/fastsafe_final_8100x50.log / fastsafe_final_8200x25.log;
+  训练 outputs/fastsafe_train.log;探针/金丝雀见上条。
+
+### [DURAB] 五跑完整数据(主口径 avg_steps = valid-only)
+| 跑 | 模型 | 域 | valid | parked | avg_steps | avg_reward | speed | laps |
+|---|---|---|---|---|---|---|---|---|
+| D1 | vision3 | 8400×10 | 2/10 | 8 | 687.5 | 690.5 | 1.376 | 0 |
+| D2 | ctrl_lr1e4 | 8400×10 | 9/10 | 1 | 340.8 | 560.8 | 2.226 | 7 |
+| D3 | vision3 | 8500×10 | 1/10 | 9 | 492.0 | 327.2 | 1.012 | 0 |
+| D4 | ctrl_lr1e4 | 8500×10 | 8/10 | 2 | 290.1 | 499.5 | 2.364 | 5 |
+| D5 | ctrl_lr1e4 | 8200×10 复跑 | 9/10 | 1 | 291.7 | 435.1 | 2.206 | 5 |
+
+- 按预注册主口径(avg_steps): **两个新种子域 ctrl 都 < vision3**(340.8<687.5,
+  290.1<492.0)→ 指向"蒸发/运气"分支;D5 vs 历史 773.6 = **-62%** 同向。
+- 口径敏感性(并列记录): valid-only 下 vision3 n 极小(2/1 局,8-9 局 parked 被剔),
+  8400 配对逐种子 ctrl 赢 8/10;若按含 parked 全局口径 vision3 更低。
+  预注册未指定此歧义,终报两口径并列,裁量留监控方。
+- D5 混杂因子: 与流 C 训练(4 sim)+D3 并发,CPU 负载在场;是否补干净复跑
+  视终报需要(非预注册必做)。
+- 证据: outputs/durab_{v3,ctrl}_{8400,8500}.log / durab_ctrl_8200var.log;
+  录帧 outputs/rec_durab_*/。
+
+### [DURAB] 续跑发车(200k→400k)
+- `--resume outputs/rl_v3anchor_ctrl_lr1e4.zip --save outputs/rl_durab_cont.zip
+  --vision --async-mode --envs 1 --eval-envs 0 --port-base 9655 --steps 200000
+  --lr 1e-4 --run-name durab_cont --seed 3`,日志 outputs/durab_cont.log,
+  TB outputs/rl_tb/durab_cont_0,ckpt 每 25k 落 outputs/rl_ckpt_durab_cont/
+  (名字从 200k 续起)。起跑已验证: sim 9655 UP、resumed lr=1e-4。
+- 训练完成后 ckpt 阶梯评 225k/250k/300k/350k/400k @8200×10,对照基线 773.6
+  答"增益是否随步数蒸发";训练曲线回落 >30% 按 3e-4 先例止损记录。

@@ -1,0 +1,59 @@
+{
+  "source_model": "/Users/hwp/Dev/DKC/sdsandbox/outputs/rl_fastsafe.zip",
+  "obs_vector": [
+    [
+      "cte/2.0",
+      "横向偏差(米),赛道中心线坐标系,左正右负"
+    ],
+    [
+      "speed/10.0",
+      "车速(米/秒,标量)"
+    ],
+    [
+      "forward_vel/10.0",
+      "前向速度(米/秒)"
+    ],
+    [
+      "yaw/180.0",
+      "偏航角(度)"
+    ],
+    [
+      "gyro_z/90.0",
+      "偏航角速度(度/秒)"
+    ],
+    [
+      "active_node/max(total_nodes,1)",
+      "赛道进度 [0,1]"
+    ],
+    [
+      "0.0",
+      "保留"
+    ],
+    [
+      "0.0",
+      "保留"
+    ],
+    [
+      "a_{k-1}.steer",
+      "最近一步策略输出转向"
+    ],
+    [
+      "a_{k-1}.throttle",
+      "最近一步策略输出油门"
+    ],
+    [
+      "a_{k-2}.steer",
+      "次近一步策略输出转向"
+    ],
+    [
+      "a_{k-2}.throttle",
+      "次近一步策略输出油门"
+    ]
+  ],
+  "action": [
+    "steering [-1,1] 左正",
+    "throttle [0,1]"
+  ],
+  "num_check_cases": 16,
+  "max_abs_diff_check": "1e-5"
+}

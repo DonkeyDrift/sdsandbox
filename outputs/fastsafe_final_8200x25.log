@@ -1,0 +1,27 @@
+[gate4] model=outputs/rl_export/fastsafe.onnx ctl_step_ms=20 episodes=25 seed_base=8200 max_steps=2500 obs_inflight=12
+[gate4] ep0 seed=8200 reward=2226.25 steps=2500 mean_speed=1.12001 -> max_steps
+[gate4] ep1 seed=8201 reward=2225.6 steps=2500 mean_speed=1.09845 -> max_steps
+[gate4] ep2 seed=8202 reward=2230.31 steps=2500 mean_speed=1.12054 -> max_steps
+[gate4] ep3 seed=8203 reward=2177.76 steps=2500 mean_speed=1.06566 -> max_steps
+[gate4] ep4 seed=8204 reward=2215.11 steps=2500 mean_speed=1.11979 -> max_steps
+[gate4] ep5 seed=8205 reward=2238.58 steps=2500 mean_speed=1.08149 -> max_steps
+[gate4] ep6 seed=8206 reward=2188.55 steps=2500 mean_speed=1.13028 -> max_steps
+[gate4] ep7 seed=8207 reward=2213.23 steps=2500 mean_speed=1.09216 -> max_steps
+[gate4] ep8 seed=8208 reward=2273 steps=2500 mean_speed=1.12983 -> max_steps
+[gate4] ep9 seed=8209 reward=2141.84 steps=2500 mean_speed=1.06887 -> max_steps
+[gate4] ep10 seed=8210 reward=2210.68 steps=2500 mean_speed=1.12455 -> max_steps
+[gate4] ep11 seed=8211 reward=2089.77 steps=2500 mean_speed=1.06617 -> max_steps
+[gate4] ep12 seed=8212 reward=2217.15 steps=2500 mean_speed=1.11775 -> max_steps
+[gate4] ep13 seed=8213 reward=2285.72 steps=2500 mean_speed=1.10701 -> max_steps
+[gate4] ep14 seed=8214 reward=2239.19 steps=2500 mean_speed=1.13048 -> max_steps
+[gate4] ep15 seed=8215 reward=2240.67 steps=2500 mean_speed=1.09695 -> max_steps
+[gate4] ep16 seed=8216 reward=2236.78 steps=2500 mean_speed=1.14537 -> max_steps
+[gate4] ep17 seed=8217 reward=2233.48 steps=2500 mean_speed=1.10071 -> max_steps
+[gate4] ep18 seed=8218 reward=2294.73 steps=2500 mean_speed=1.13942 -> max_steps
+[gate4] ep19 seed=8219 reward=2244.76 steps=2500 mean_speed=1.1098 -> max_steps
+[gate4] ep20 seed=8220 reward=2256.81 steps=2500 mean_speed=1.10713 -> max_steps
+[gate4] ep21 seed=8221 reward=2256.7 steps=2500 mean_speed=1.10945 -> max_steps
+[gate4] ep22 seed=8222 reward=2190.15 steps=2500 mean_speed=1.10436 -> max_steps
+[gate4] ep23 seed=8223 reward=2231.95 steps=2500 mean_speed=1.12351 -> max_steps
+[gate4] ep24 seed=8224 reward=2167.54 steps=2500 mean_speed=1.08049 -> max_steps
+[gate4] valid 25/25 avg_reward=2221.05 avg_steps=2500 mean_speed=1.10761 crashes=0 laps=0
