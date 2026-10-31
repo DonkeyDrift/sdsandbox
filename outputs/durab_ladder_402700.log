@@ -1,0 +1,76 @@
+[UnityMemory] Configuration Parameters - Can be set up in boot.config
+    "memorysetup-bucket-allocator-granularity=16"
+    "memorysetup-bucket-allocator-bucket-count=8"
+    "memorysetup-bucket-allocator-block-size=4194304"
+    "memorysetup-bucket-allocator-block-count=1"
+    "memorysetup-main-allocator-block-size=16777216"
+    "memorysetup-thread-allocator-block-size=16777216"
+    "memorysetup-gfx-main-allocator-block-size=16777216"
+    "memorysetup-gfx-thread-allocator-block-size=16777216"
+    "memorysetup-cache-allocator-block-size=4194304"
+    "memorysetup-typetree-allocator-block-size=2097152"
+    "memorysetup-profiler-bucket-allocator-granularity=16"
+    "memorysetup-profiler-bucket-allocator-bucket-count=8"
+    "memorysetup-profiler-bucket-allocator-block-size=4194304"
+    "memorysetup-profiler-bucket-allocator-block-count=1"
+    "memorysetup-profiler-allocator-block-size=16777216"
+    "memorysetup-profiler-editor-allocator-block-size=1048576"
+    "memorysetup-temp-allocator-size-main=4194304"
+    "memorysetup-job-temp-allocator-block-size=2097152"
+    "memorysetup-job-temp-allocator-block-size-background=1048576"
+    "memorysetup-job-temp-allocator-reduction-small-platforms=262144"
+    "memorysetup-allocator-temp-initial-block-size-main=262144"
+    "memorysetup-allocator-temp-initial-block-size-worker=262144"
+    "memorysetup-temp-allocator-size-background-worker=32768"
+    "memorysetup-temp-allocator-size-job-worker=262144"
+    "memorysetup-temp-allocator-size-preload-manager=262144"
+    "memorysetup-temp-allocator-size-nav-mesh-worker=65536"
+    "memorysetup-temp-allocator-size-audio-worker=65536"
+    "memorysetup-temp-allocator-size-cloud-worker=32768"
+    "memorysetup-temp-allocator-size-gfx=262144"
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9651 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+INFO:gym_donkeycar.envs.donkey_sim:done sending cam config. {'img_enc': 'JPG', 'img_w': 160, 'img_h': 120}
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/utils.py:573: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:209.)
+  return th.as_tensor(obs, device=device)
+[rl_eval] 连接 127.0.0.1:9651 sync=False state_obs=False level=mountain_track
+starting DonkeyGym env
+Setting default: frame_skip 1
+Setting default: log_level 20
+Setting default: steer_limit 1.0
+Setting default: throttle_min 0.0
+Setting default: throttle_max 1.0
+Setting default: done_on_flip True
+Setting default: done_on_stuck True
+Setting default: stuck_time_thresh 2.5
+donkey subprocess started
+[rl_eval] 现场录帧开启 -> outputs/rec_durab_ladder_402700 (每局末 24 帧)
+[rl_eval] ep0 (seed=8200): reward=195.8 steps=93 mean_speed=2.87 -> terminated(cte=3.29 hit=none flipped=False stuck=0.0 lap=0 pos=(-0.0322529636323452, 0.311309635639191, 12.4614124298096))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep00_seed8200_crash 帧差=27.46
+[rl_eval] ep1 (seed=8201): reward=395.2 steps=201 mean_speed=3.25 -> terminated(cte=-2.78 hit=none flipped=False stuck=0.0 lap=0 pos=(-8.63711452484131, 0.790072977542877, 7.67941045761108))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep01_seed8201_crash 帧差=21.29
+[rl_eval] ep2 (seed=8202): reward=144.1 steps=77 mean_speed=2.67 -> terminated(cte=-2.89 hit=none flipped=False stuck=0.0 lap=0 pos=(0.0792186185717583, 0.455713242292404, 13.2252817153931))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep02_seed8202_crash 帧差=25.77
+[rl_eval] ep3 (seed=8203): reward=542.9 steps=243 mean_speed=3.35 -> terminated(cte=-2.75 hit=none flipped=False stuck=0.0 lap=0 pos=(-0.134354621171951, 0.455478727817535, 13.249192237854))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep03_seed8203_crash 帧差=25.64
+[rl_eval] ep4 (seed=8204): reward=289.2 steps=136 mean_speed=3.03 -> terminated(cte=3.12 hit=none flipped=False stuck=0.0 lap=1 pos=(6.32821846008301, 0.640146315097809, 5.74005508422852))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep04_seed8204_crash 帧差=26.49
+[rl_eval] ep5 (seed=8205): reward=125.3 steps=68 mean_speed=2.33 -> terminated(cte=2.52 hit=none flipped=False stuck=0.0 lap=0 pos=(1.53522408008575, 0.730585336685181, 8.07824420928955))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep05_seed8205_crash 帧差=21.33
+[rl_eval] ep6 (seed=8206): reward=258.2 steps=114 mean_speed=3.04 -> terminated(cte=-2.58 hit=none flipped=False stuck=0.0 lap=1 pos=(7.03719139099121, 0.643724203109741, 5.96303510665894))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep06_seed8206_crash 帧差=24.57
+[rl_eval] ep7 (seed=8207): reward=139.7 steps=79 mean_speed=2.59 -> terminated(cte=2.55 hit=none flipped=False stuck=0.0 lap=0 pos=(-2.95332646369934, 0.705069124698639, 6.00228357315063))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep07_seed8207_crash 帧差=24.21
+[rl_eval] ep8 (seed=8208): reward=318.4 steps=139 mean_speed=2.99 -> terminated(cte=-2.75 hit=none flipped=False stuck=0.0 lap=1 pos=(7.00524997711182, 0.861191689968109, -0.290525197982788))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep08_seed8208_crash 帧差=24.11
+[rl_eval] ep9 (seed=8209): reward=100.2 steps=63 mean_speed=2.31 -> terminated(cte=2.63 hit=none flipped=False stuck=0.0 lap=0 pos=(-2.96036005020142, 0.706372559070587, 6.01823949813843))
+[rl_eval] 现场 -> outputs/rec_durab_ladder_402700/ep09_seed8209_crash 帧差=25.08
+closing donkey sim subprocess
+[rl_eval] 有效局 10/10(parked 剔除 0) 平均 reward=250.9 平均步数=121 平均速度=2.84
+RL_EVAL_JSON {"episodes": 10, "valid_episodes": 10, "parked_episodes": 0, "avg_reward": 250.9, "avg_steps": 121.3, "mean_speed": 2.844, "progress_gate": 1.0, "park_epsilon": 2.0, "crash_episodes": 10, "crash_rate": 1.0, "laps": 3, "max_steps": 2500, "per_episode": [{"reward": 195.8, "steps": 93, "mean_speed": 2.872, "parked": false, "reason": "terminated(cte=3.29 hit=none flipped=Fal"}, {"reward": 395.2, "steps": 201, "mean_speed": 3.246, "parked": false, "reason": "terminated(cte=-2.78 hit=none flipped=Fa"}, {"reward": 144.1, "steps": 77, "mean_speed": 2.67, "parked": false, "reason": "terminated(cte=-2.89 hit=none flipped=Fa"}, {"reward": 542.9, "steps": 243, "mean_speed": 3.353, "parked": false, "reason": "terminated(cte=-2.75 hit=none flipped=Fa"}, {"reward": 289.2, "steps": 136, "mean_speed": 3.029, "parked": false, "reason": "terminated(cte=3.12 hit=none flipped=Fal"}, {"reward": 125.3, "steps": 68, "mean_speed": 2.33, "parked": false, "reason": "terminated(cte=2.52 hit=none flipped=Fal"}, {"reward": 258.2, "steps": 114, "mean_speed": 3.04, "parked": false, "reason": "terminated(cte=-2.58 hit=none flipped=Fa"}, {"reward": 139.7, "steps": 79, "mean_speed": 2.593, "parked": false, "reason": "terminated(cte=2.55 hit=none flipped=Fal"}, {"reward": 318.4, "steps": 139, "mean_speed": 2.992, "parked": false, "reason": "terminated(cte=-2.75 hit=none flipped=Fa"}, {"reward": 100.2, "steps": 63, "mean_speed": 2.311, "parked": false, "reason": "terminated(cte=2.63 hit=none flipped=Fal"}], "seeds": [8200, 8201, 8202, 8203, 8204, 8205, 8206, 8207, 8208, 8209]}
