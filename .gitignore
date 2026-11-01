@@ -89,6 +89,7 @@ outputs/*.crash
 outputs/*.jsonl
 outputs/rec_*/
 outputs/rl_replay_*/
+outputs/reeval_*_frames/
 outputs/rl_export/
 outputs/bc_data*/
 outputs/bc_*probe*/
