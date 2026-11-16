@@ -33,6 +33,7 @@ namespace tk
 
         public void Start()
         {
+            DonkeySimUpdate.SimulatorUpdateButtonHook.Install(this);
             if (GlobalState.sceneNames == null)
             {
                 try
