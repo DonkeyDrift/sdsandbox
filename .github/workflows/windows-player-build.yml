@@ -1,0 +1,54 @@
+name: windows-player-build
+
+on:
+  push:
+    branches:
+      - Unity6
+      - "Unity6-**"
+    paths:
+      - "sdsim/**"
+      - ".github/workflows/windows-player-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-windows-player:
+    name: Build Windows player (Unity 6000.6.9f1)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Build Windows player
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: sdsim
+          unityVersion: 6000.6.9f1
+          targetPlatform: StandaloneWindows64
+          buildMethod: PlayerBuilder.BuildWindowsCli
+
+      - name: Upload player artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DonkeySimWin-unity6
+          path: sdsim/Builds/DonkeySimWin/
+          if-no-files-found: error
+
+      - name: Smoke test - launch and stay alive
+        shell: pwsh
+        run: |
+          $exe = "sdsim\Builds\DonkeySimWin\donkey_sim.exe"
+          if (-Not (Test-Path $exe)) { throw "player exe not found" }
+          $proc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 25
+          $alive = -Not $proc.HasExited
+          Write-Host "process alive after 25s: $alive"
+          if (-Not $alive) { throw "player exited immediately (exit code $($proc.ExitCode))" }
+          Stop-Process -Id $proc.Id -Force
+          Write-Host "smoke test passed"

@@ -15,6 +15,26 @@ public class PlayerBuilder : Editor
         LinuxBuild();
     }
 
+    public static void BuildAllCli()
+    {
+        Build();
+    }
+
+    public static void BuildMacCli()
+    {
+        MacBuild();
+    }
+
+    public static void BuildWindowsCli()
+    {
+        WinBuild();
+    }
+
+    public static void BuildLinuxCli()
+    {
+        LinuxBuild();
+    }
+
     [MenuItem("Build/ Build Windows Player")]
     static void WinBuild()
     {
