@@ -71,10 +71,9 @@ public class CarSpawner : MonoBehaviour
 
             if (raceCameras != null)
             {
-                int carID = toRemove.GetInstanceID() - 4;
-                if (raceCameras.carProgress.ContainsKey(carID))
+                if (raceCameras.carProgress.ContainsKey(toRemove))
                 {
-                    raceCameras.carProgress.Remove(carID);
+                    raceCameras.carProgress.Remove(toRemove);
                 }
             }
 
@@ -120,10 +119,9 @@ public class CarSpawner : MonoBehaviour
 
             if (raceCameras != null)
             {
-                int carID = car.GetInstanceID() - 4;
-                if (raceCameras.carProgress.ContainsKey(carID))
+                if (raceCameras.carProgress.ContainsKey(car))
                 {
-                    raceCameras.carProgress.Remove(carID);
+                    raceCameras.carProgress.Remove(car);
                 }
             }
 

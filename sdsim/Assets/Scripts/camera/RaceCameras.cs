@@ -8,7 +8,7 @@ public class RaceCameras : MonoBehaviour, IWaitCarPath
     List<RaceCamera> raceCameras = new List<RaceCamera>();
     List<int> nodeIndexes = new List<int>();
     List<float> deltaAngles = new List<float>();
-    public Dictionary<int, int> carProgress = new Dictionary<int, int>();
+    public Dictionary<GameObject, int> carProgress = new Dictionary<GameObject, int>();
 
 
     public float distanceBetweenCameras = 30.0f;
@@ -113,34 +113,34 @@ public class RaceCameras : MonoBehaviour, IWaitCarPath
 
     public void CameraTriggered(Collider col, Camera camera, int index)
     {
-        int carID = col.attachedRigidbody.GetInstanceID();
+        GameObject car = col.attachedRigidbody.gameObject;
 
-        if (carProgress.ContainsKey(carID))
+        if (carProgress.ContainsKey(car))
         {
-            carProgress[carID] = index;
+            carProgress[car] = index;
 
             int furtherValue = int.MinValue;
-            int furtherID = 0;
-            foreach (int key in carProgress.Keys)
+            GameObject furtherCar = null;
+            foreach (GameObject key in carProgress.Keys)
             {
 
                 if (carProgress[key] > furtherValue)
                 {
                     furtherValue = carProgress[key];
-                    furtherID = key;
+                    furtherCar = key;
                 }
 
             }
 
-            if (furtherID != 0)
+            if (furtherCar != null)
             {
                 EnableCameras(false);
-                raceCameras[carProgress[furtherID]].camera.enabled = true;
+                raceCameras[carProgress[furtherCar]].camera.enabled = true;
             }
         }
         else
         {
-            carProgress.Add(carID, index);
+            carProgress.Add(car, index);
         }
 
     }
