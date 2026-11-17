@@ -13,6 +13,12 @@ namespace DonkeySimUpdate
         private const string ButtonLabel = "Update & Restart";
         private static SimulatorUpdateButton button;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void InstallDefault()
+        {
+            Install(null);
+        }
+
         public static void Install(object menuHandler)
         {
             if (button != null)
@@ -154,6 +160,18 @@ namespace DonkeySimUpdate
         private sealed class SimulatorUpdateButton : MonoBehaviour
         {
             private GUIStyle buttonStyle;
+            private bool testInvoked;
+
+            private void Update()
+            {
+                if (!testInvoked &&
+                    Environment.GetEnvironmentVariable("DONKEY_SIM_UPDATE_TEST") == "1" &&
+                    Time.frameCount >= 10)
+                {
+                    testInvoked = true;
+                    UpdateAndRestart();
+                }
+            }
 
             private void OnGUI()
             {
