@@ -13,7 +13,7 @@ on:
 jobs:
   build-windows-player:
     name: Build Windows player (Unity 6000.6.9f1)
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - name: Checkout
@@ -40,10 +40,22 @@ jobs:
           path: sdsim/Builds/DonkeySimWin/
           if-no-files-found: error
 
-      - name: Smoke test - launch and stay alive
+  smoke-test-windows:
+    name: Smoke test on Windows runner
+    runs-on: windows-latest
+    needs: build-windows-player
+    timeout-minutes: 15
+    steps:
+      - name: Download player artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: DonkeySimWin-unity6
+          path: player
+
+      - name: Launch and stay alive
         shell: pwsh
         run: |
-          $exe = "sdsim\Builds\DonkeySimWin\donkey_sim.exe"
+          $exe = "player\donkey_sim.exe"
           if (-Not (Test-Path $exe)) { throw "player exe not found" }
           $proc = Start-Process -FilePath $exe -PassThru
           Start-Sleep -Seconds 25
