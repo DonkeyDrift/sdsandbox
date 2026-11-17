@@ -106,6 +106,13 @@ public class PlayerBuilder : Editor
 
     static void CopyDirectory(string SourcePath, string DestinationPath)
     {
+        // AssetBundles are optional content; a fresh checkout has no
+        // Assets/AssetBundles/<target> directory until BundleBuilder runs.
+        if (!System.IO.Directory.Exists(SourcePath))
+        {
+            Debug.Log("skipping optional asset bundle copy, missing " + SourcePath);
+            return;
+        }
 
         if (!System.IO.Directory.Exists(DestinationPath)) { System.IO.Directory.CreateDirectory(DestinationPath); }
 
