@@ -11,7 +11,7 @@ namespace DonkeySimUpdate
 {
     public static class SimulatorUpdateButtonHook
     {
-        private const string LatestReleaseUrl = "https://github.com/tawnkramer/gym-donkeycar/releases/latest";
+        private const string LatestReleaseUrl = "https://github.com/DonkeyDrift/gym-donkeycar/releases/latest";
         private const string UpdaterModule = "gym_donkeycar.simulator_update";
         private const string ButtonLabel = "Update & Restart";
         private static SimulatorUpdateButton button;

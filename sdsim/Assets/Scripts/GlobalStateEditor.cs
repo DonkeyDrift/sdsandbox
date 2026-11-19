@@ -118,14 +118,12 @@ public class GlobalStateEditor : MonoBehaviour
     }
 
     private bool showPrivateKey = false;
-    private VersionCheck versionCheck;
+
     void Awake()
     {
         LoadPlayerPrefs();
         SaveToPlayerPrefs();
 
-        versionCheck = gameObject.GetComponent<VersionCheck>();
-        
         //keep it processing even when not in focus.
         Application.runInBackground = true;
 
@@ -265,15 +263,6 @@ public class GlobalStateEditor : MonoBehaviour
         YOffset += Ysteps;
         bool doSave = GUI.Button(new Rect(0, YOffset, width, 20), "Save");
         YOffset += Ysteps;
-
-        // Check if the version used is the latest version if not, notify the user !
-        if (versionCheck.latest != GlobalState.version)
-        {
-            YOffset += Ysteps;
-            bool getLatest = GUI.Button(new Rect(0, YOffset, width, Ysteps * 2), "A new version is available, \n click here to get latest version !");
-            YOffset += Ysteps * 2;
-            if (getLatest) { versionCheck.GetLatestVersion(); }
-        }
 
         YOffset += Ysteps;
         showPrivateKey = GUI.Toggle(new Rect(0, YOffset, width, 20), showPrivateKey, "showPrivateKey");
