@@ -19,6 +19,37 @@ namespace tk
         private tk.JsonTcpClient client;
         private string[] bundleAssetScenePaths;
 
+        // display-only names for the menu buttons; scene ids used for loading,
+        // the TCP protocol and the preview images under Resources/UI stay unchanged
+        private static readonly Dictionary<string, string> sceneDisplayNames = new Dictionary<string, string>
+        {
+            { "circuit_launch", "Circuit Launch" },
+            { "mountain_track", "Mountain Track" },
+            { "mini_monaco", "Mini Monaco" },
+            { "warren", "Warren" },
+            { "roboracingleague_1", "Robot Racing League" },
+            { "generated_track", "Generated Track" },
+            { "generated_road", "Generated Road" },
+            { "warehouse", "Warehouse" },
+            { "sparkfun_avc", "Sparkfun AVC" },
+            { "waveshare", "Waveshare" },
+        };
+
+        static string GetSceneDisplayName(string scene_name)
+        {
+            string displayName;
+            if (sceneDisplayNames.TryGetValue(scene_name, out displayName))
+                return displayName;
+
+            string[] words = scene_name.Split('_');
+            for (int i = 0; i < words.Length; i++)
+            {
+                if (words[i].Length > 0)
+                    words[i] = char.ToUpper(words[i][0]) + words[i].Substring(1);
+            }
+            return string.Join(" ", words);
+        }
+
         public void Init(tk.JsonTcpClient _client)
         {
             _client.dispatchInMainThread = true;
@@ -156,10 +187,9 @@ namespace tk
             Button button = go.GetComponent<Button>();
             button.onClick.AddListener(delegate { LoadScene(scene_path); });
 
-            // modify the text to match the scene_name
             GameObject text_go = go.transform.GetChild(0).gameObject;
             Text text = text_go.GetComponent<Text>();
-            text.text = scene_name;
+            text.text = GetSceneDisplayName(scene_name);
 
             // try to load the preview image located in the Resources folder
             Texture2D texture = Resources.Load<Texture2D>("UI/" + scene_name);
