@@ -15,6 +15,11 @@ public class BundleBuilder : Editor
         }
     }
 
+    public static void BuildAllCli()
+    {
+        BuildAllAssetsBundles();
+    }
+
     [MenuItem("Build/ Build Active Target AssetsBundles")]
     static void BuildCurrentTargetAssetsBundles()
     {
