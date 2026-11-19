@@ -293,9 +293,11 @@ namespace DonkeySimUpdate
                 if (buttonStyle == null)
                 {
                     buttonStyle = new GUIStyle(GUI.skin.button);
+                    buttonStyle.font = Font.CreateDynamicFontFromOSFont("Arial", 22);
                     buttonStyle.fontSize = 22;
                     buttonStyle.fontStyle = FontStyle.Bold;
                     buttonStyle.alignment = TextAnchor.MiddleCenter;
+                    buttonStyle.normal.textColor = new Color(0.1f, 0.1f, 0.1f, 1.0f);
                 }
 
                 float width = Mathf.Max(320.0f, Screen.width * 0.22f);

@@ -22,10 +22,12 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def compile_tools(work, mono_root, managed_dir, hook_source, patcher_source):
+def compile_tools(work, mono_root, managed_dir, hook_sources, patcher_source):
     mcs = mono_root / "bin" / "mcs"
     mono = mono_root / "bin" / "mono"
     cecil = mono_root / "lib/mono/gac/Mono.Cecil/0.11.1.0__0738eb9f132ed756/Mono.Cecil.dll"
+    if not cecil.is_file():
+        cecil = mono_root / "lib/mono/gac/Mono.Cecil/0.10.0.0__0738eb9f132ed756/Mono.Cecil.dll"
     if not cecil.is_file():
         cecil = mono_root / "lib/mono/unity/Mono.Cecil.dll"
     hook_dll = work / HOOK_NAME
@@ -50,7 +52,7 @@ def compile_tools(work, mono_root, managed_dir, hook_source, patcher_source):
             "-sdk:4.5",
             f"-out:{hook_dll}",
             *[f"-r:{managed_dir / name}" for name in references],
-            hook_source,
+            *[str(hook_source) for hook_source in hook_sources],
         ]
     )
 
@@ -83,7 +85,7 @@ def copy_zip_entry(source, info, destination, replacement=None):
     destination.writestr(cloned, data)
 
 
-def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
+def patch_zip(source_path, output_path, hook_sources, patcher_source, mono_root):
     source_path = source_path.absolute()
     output_path = output_path.absolute()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,19 +96,25 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
         managed_dir.mkdir()
 
         with zipfile.ZipFile(source_path) as source:
+            # Windows/Linux releases use <root>/donkey_sim_Data/, macOS app bundles use
+            # <root>/donkey_sim.app/Contents/Resources/Data/, so match by suffix.
             assembly_entries = [
-                info for info in source.infolist() if info.filename.endswith("/donkey_sim_Data/Managed/Assembly-CSharp.dll")
+                info for info in source.infolist() if info.filename.endswith("/Managed/Assembly-CSharp.dll")
             ]
             manifest_entries = [
-                info for info in source.infolist() if info.filename.endswith("/donkey_sim_Data/ScriptingAssemblies.json")
+                info for info in source.infolist() if info.filename.endswith("/ScriptingAssemblies.json")
             ]
             if len(assembly_entries) != 1 or len(manifest_entries) != 1:
                 raise RuntimeError("expected exactly one Assembly-CSharp.dll and ScriptingAssemblies.json")
 
             assembly_info = assembly_entries[0]
             manifest_info = manifest_entries[0]
-            root = assembly_info.filename.split("/")[0]
             managed_prefix = assembly_info.filename.rsplit("/", 1)[0] + "/"
+            expected_manifest = managed_prefix[: -len("Managed/")] + "ScriptingAssemblies.json"
+            if manifest_info.filename != expected_manifest:
+                raise RuntimeError(
+                    f"ScriptingAssemblies.json ({manifest_info.filename}) is not next to {managed_prefix}"
+                )
 
             for info in source.infolist():
                 if info.filename.startswith(managed_prefix) and not info.is_dir():
@@ -121,7 +129,7 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
                 work,
                 mono_root,
                 managed_dir,
-                hook_source.absolute(),
+                [hook_source.absolute() for hook_source in hook_sources],
                 patcher_source.absolute(),
             )
             patched_assembly = work / "Assembly-CSharp.patched.dll"
@@ -143,6 +151,9 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
             manifest["types"].append(16)
             manifest_bytes = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
             hook_bytes = hook_dll.read_bytes()
+            for token in (b"SimulatorUpdateButtonHook", b"MacTitleBarHider"):
+                if token not in hook_bytes:
+                    raise RuntimeError(f"hook dll does not contain {token.decode('ascii')}")
 
             temporary_output = output_path.with_suffix(output_path.suffix + ".tmp")
             with zipfile.ZipFile(temporary_output, "w", zipfile.ZIP_DEFLATED) as destination:
@@ -155,7 +166,7 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
                         copy_zip_entry(source, info, destination)
 
                 hook_info = zipfile.ZipInfo(
-                    f"{root}/donkey_sim_Data/Managed/{HOOK_NAME}",
+                    f"{managed_prefix}{HOOK_NAME}",
                     assembly_info.date_time,
                 )
                 hook_info.compress_type = zipfile.ZIP_DEFLATED
@@ -171,7 +182,7 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
                 expected = {
                     assembly_info.filename,
                     manifest_info.filename,
-                    f"{root}/donkey_sim_Data/Managed/{HOOK_NAME}",
+                    f"{managed_prefix}{HOOK_NAME}",
                 }
                 if not expected.issubset(names):
                     raise RuntimeError("output zip is missing patched entries")
@@ -186,7 +197,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("source_zip", type=Path)
     parser.add_argument("output_zip", type=Path)
-    parser.add_argument("--hook-source", type=Path, required=True)
+    parser.add_argument("--hook-source", type=Path, nargs="+", required=True)
     parser.add_argument("--patcher-source", type=Path, required=True)
     parser.add_argument(
         "--mono-root",

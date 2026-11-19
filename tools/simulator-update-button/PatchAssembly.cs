@@ -29,13 +29,15 @@ internal static class PatchAssembly
         AssemblyDefinition assembly = AssemblyDefinition.ReadAssembly(assemblyPath, readerParameters);
         AssemblyDefinition hookAssembly = AssemblyDefinition.ReadAssembly(hookPath, readerParameters);
         TypeDefinition hookType = hookAssembly.MainModule.GetType("DonkeySimUpdate.SimulatorUpdateButtonHook");
-        if (hookType == null)
+        TypeDefinition hiderType = hookAssembly.MainModule.GetType("DonkeySimUpdate.MacTitleBarHider");
+        if (hookType == null || hiderType == null)
         {
-            Console.Error.WriteLine("hook type not found");
+            Console.Error.WriteLine("hook types not found");
             return 3;
         }
 
         MethodDefinition installMethod = hookType.Methods.Single(method => method.Name == "Install");
+        MethodDefinition applyMethod = hiderType.Methods.Single(method => method.Name == "Apply");
         TypeDefinition targetType = assembly.MainModule.GetType("tk.TcpMenuHandler");
         if (targetType == null)
         {
@@ -44,17 +46,29 @@ internal static class PatchAssembly
         }
 
         MethodDefinition startMethod = targetType.Methods.Single(method => method.Name == "Start");
-        if (AlreadyPatched(startMethod))
+        bool hasInstall = HasInjectedCall(startMethod, "Install");
+        bool hasApply = HasInjectedCall(startMethod, "Apply");
+        if (hasInstall && hasApply)
         {
             Console.WriteLine("Assembly already patched");
             return 0;
         }
 
-        MethodReference importedMethod = assembly.MainModule.ImportReference(installMethod);
+        MethodReference importedInstall = assembly.MainModule.ImportReference(installMethod);
+        MethodReference importedApply = assembly.MainModule.ImportReference(applyMethod);
         ILProcessor il = startMethod.Body.GetILProcessor();
         Instruction first = startMethod.Body.Instructions[0];
-        il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
-        il.InsertBefore(first, il.Create(OpCodes.Call, importedMethod));
+        if (!hasInstall)
+        {
+            il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+            il.InsertBefore(first, il.Create(OpCodes.Call, importedInstall));
+        }
+
+        if (!hasApply)
+        {
+            il.InsertBefore(first, il.Create(OpCodes.Call, importedApply));
+        }
+
         startMethod.Body.MaxStackSize = Math.Max(startMethod.Body.MaxStackSize, (ushort)8);
 
         string outputDirectory = Path.GetDirectoryName(outputPath);
@@ -68,14 +82,14 @@ internal static class PatchAssembly
         return 0;
     }
 
-    private static bool AlreadyPatched(MethodDefinition method)
+    private static bool HasInjectedCall(MethodDefinition method, string name)
     {
         foreach (Instruction instruction in method.Body.Instructions)
         {
             MethodReference reference = instruction.Operand as MethodReference;
             if (reference != null &&
-                reference.DeclaringType.FullName == "DonkeySimUpdate.SimulatorUpdateButtonHook" &&
-                reference.Name == "Install")
+                reference.DeclaringType.Namespace == "DonkeySimUpdate" &&
+                reference.Name == name)
             {
                 return true;
             }
