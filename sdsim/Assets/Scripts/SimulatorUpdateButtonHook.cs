@@ -14,6 +14,7 @@ namespace DonkeySimUpdate
         private const string LatestReleaseUrl = "https://github.com/DonkeyDrift/gym-donkeycar/releases/latest";
         private const string UpdaterModule = "gym_donkeycar.simulator_update";
         private const string ButtonLabel = "Update & Restart";
+        private const string ChannelPrefKey = "DonkeySimUpdateChannel";
         private static SimulatorUpdateButton button;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -34,10 +35,39 @@ namespace DonkeySimUpdate
             UnityEngine.Object.DontDestroyOnLoad(gameObject);
         }
 
+        public static bool IsPrereleaseChannel()
+        {
+            return PlayerPrefs.GetString(ChannelPrefKey, "stable") == "prerelease";
+        }
+
+        public static void DrawChannelToggle(Rect panelRect)
+        {
+            float x = panelRect.x * Screen.width;
+            float y = (panelRect.y + panelRect.height) * Screen.height + 8.0f;
+            float width = Mathf.Max(240.0f, panelRect.width * Screen.width);
+            string label = IsPrereleaseChannel()
+                ? "Update channel: Pre-release (click for Stable)"
+                : "Update channel: Stable (click for Pre-release)";
+            if (GUI.Button(new Rect(x, y, width, 26.0f), label))
+            {
+                PlayerPrefs.SetString(ChannelPrefKey, IsPrereleaseChannel() ? "stable" : "prerelease");
+                PlayerPrefs.Save();
+                if (button != null)
+                {
+                    button.ResetUpdateCheck();
+                }
+            }
+        }
+
+        private static string ChannelArgument()
+        {
+            return IsPrereleaseChannel() ? " --prerelease" : "";
+        }
+
         private static void UpdateAndRestart()
         {
             string pid = Process.GetCurrentProcess().Id.ToString();
-            string arguments = "update --apply-after-exit --pid " + pid + " --restart";
+            string arguments = "update --apply-after-exit --pid " + pid + " --restart" + ChannelArgument();
             if (StartUpdater(arguments))
             {
                 Application.Quit();
@@ -196,6 +226,12 @@ namespace DonkeySimUpdate
             private volatile bool updateAvailable;
             private bool testInvoked;
 
+            public void ResetUpdateCheck()
+            {
+                updateCheckStarted = false;
+                updateAvailable = false;
+            }
+
             private void Update()
             {
                 if (IsMenuScene(SceneManager.GetActiveScene()))
@@ -276,7 +312,7 @@ namespace DonkeySimUpdate
             {
                 ProcessStartInfo startInfo = new ProcessStartInfo();
                 startInfo.FileName = fileName;
-                startInfo.Arguments = argumentPrefix + "check --json";
+                startInfo.Arguments = argumentPrefix + "check --json" + ChannelArgument();
                 startInfo.UseShellExecute = false;
                 startInfo.CreateNoWindow = true;
                 startInfo.RedirectStandardOutput = true;

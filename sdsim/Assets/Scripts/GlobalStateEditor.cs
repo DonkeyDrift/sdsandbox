@@ -282,6 +282,8 @@ public class GlobalStateEditor : MonoBehaviour
 
         GUI.EndScrollView();
         GUI.EndGroup();
+
+        DonkeySimUpdate.SimulatorUpdateButtonHook.DrawChannelToggle(rect);
     }
 
     void SaveToPlayerPrefs()

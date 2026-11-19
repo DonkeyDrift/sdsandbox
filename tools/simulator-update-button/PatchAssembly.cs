@@ -59,6 +59,7 @@ internal static class PatchAssembly
         }
 
         RemoveSettingsVersionButton(assembly);
+        InjectChannelToggle(assembly, hookType);
 
         string outputDirectory = Path.GetDirectoryName(outputPath);
         if (!string.IsNullOrEmpty(outputDirectory))
@@ -187,6 +188,67 @@ internal static class PatchAssembly
         body.Instructions.Add(Instruction.Create(OpCodes.Ret));
         body.MaxStackSize = Math.Max(body.MaxStackSize, (ushort)1);
         Console.WriteLine("emptied " + type.Name + "." + name);
+    }
+
+    private static void InjectChannelToggle(AssemblyDefinition assembly, TypeDefinition hookType)
+    {
+        MethodDefinition drawMethod = hookType.Methods.Single(method => method.Name == "DrawChannelToggle");
+        TypeDefinition globalStateEditor = assembly.MainModule.GetType("GlobalStateEditor");
+        if (globalStateEditor == null)
+        {
+            Console.WriteLine("GlobalStateEditor not found; skipping channel toggle injection");
+            return;
+        }
+
+        MethodDefinition onGui = globalStateEditor.Methods.SingleOrDefault(method => method.Name == "OnGUI");
+        if (onGui == null || !onGui.HasBody)
+        {
+            Console.WriteLine("GlobalStateEditor.OnGUI not found; skipping channel toggle injection");
+            return;
+        }
+
+        foreach (Instruction instruction in onGui.Body.Instructions)
+        {
+            MethodReference reference = instruction.Operand as MethodReference;
+            if (reference != null &&
+                reference.DeclaringType.FullName == "DonkeySimUpdate.SimulatorUpdateButtonHook" &&
+                reference.Name == "DrawChannelToggle")
+            {
+                Console.WriteLine("channel toggle already injected in GlobalStateEditor.OnGUI");
+                return;
+            }
+        }
+
+        Instruction endGroup = null;
+        foreach (Instruction instruction in onGui.Body.Instructions)
+        {
+            MethodReference reference = instruction.Operand as MethodReference;
+            if (instruction.OpCode == OpCodes.Call &&
+                reference != null &&
+                reference.DeclaringType.Name == "GUI" &&
+                reference.Name == "EndGroup")
+            {
+                endGroup = instruction;
+            }
+        }
+
+        if (endGroup == null)
+        {
+            Console.WriteLine("GUI.EndGroup not found in GlobalStateEditor.OnGUI; skipping channel toggle injection");
+            return;
+        }
+
+        MethodReference importedDraw = assembly.MainModule.ImportReference(drawMethod);
+        FieldReference rectField = onGui.Module.ImportReference(globalStateEditor.Fields.Single(field => field.Name == "rect"));
+        ILProcessor il = onGui.Body.GetILProcessor();
+        Instruction callDraw = il.Create(OpCodes.Call, importedDraw);
+        Instruction loadRect = il.Create(OpCodes.Ldfld, rectField);
+        Instruction loadThis = il.Create(OpCodes.Ldarg_0);
+        il.InsertAfter(endGroup, callDraw);
+        il.InsertAfter(endGroup, loadRect);
+        il.InsertAfter(endGroup, loadThis);
+        onGui.Body.MaxStackSize = Math.Max(onGui.Body.MaxStackSize, (ushort)8);
+        Console.WriteLine("injected update channel toggle into GlobalStateEditor.OnGUI");
     }
 
     private static bool AlreadyPatched(MethodDefinition method)
