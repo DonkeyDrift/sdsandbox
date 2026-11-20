@@ -2,12 +2,30 @@
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
 
 HOOK_NAME = "SimulatorUpdateButtonHook.dll"
+
+# Release archives used to ship `donkey_sim*` names; repacked outputs use the
+# `Donkey Sim` spelling.  Unity requires the executable and its `<name>_Data`
+# folder to match, so they are always renamed as a pair.
+ENTRY_RENAMES = (
+    ("donkey_sim.exe", "Donkey Sim.exe"),
+    ("donkey_sim.x86_64", "Donkey Sim.x86_64"),
+    ("donkey_sim.app", "Donkey Sim.app"),
+    ("/MacOS/donkey_sim", "/MacOS/Donkey Sim"),
+    ("donkey_sim_Data", "Donkey Sim_Data"),
+)
+
+
+def renamed_entry(filename):
+    for old, new in ENTRY_RENAMES:
+        filename = filename.replace(old, new)
+    return filename
 
 
 def run(command, **kwargs):
@@ -76,16 +94,20 @@ def compile_tools(work, mono_root, managed_dir, hook_source, patcher_source):
             f"-out:{patcher_exe}",
             f"-r:{mono_root / 'lib/mono/4.5/mscorlib.dll'}",
             f"-r:{cecil}",
+            f"-r:{managed_dir / 'netstandard.dll'}",
             f"-r:{mono_root / 'lib/mono/4.5/System.Core.dll'}",
             patcher_source,
         ]
     )
+    # mono resolves dependencies next to the executable first; keep Cecil reachable
+    # for mono roots whose global assembly cache has no 0.11.x build.
+    shutil.copy(cecil, work / "Mono.Cecil.dll")
     return mono, hook_dll, patcher_exe
 
 
 def copy_zip_entry(source, info, destination, replacement=None):
     data = source.read(info.filename) if replacement is None else replacement
-    cloned = zipfile.ZipInfo(info.filename, info.date_time)
+    cloned = zipfile.ZipInfo(renamed_entry(info.filename), info.date_time)
     cloned.compress_type = zipfile.ZIP_DEFLATED
     cloned.create_system = info.create_system
     cloned.external_attr = info.external_attr
@@ -120,6 +142,11 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
             assembly_info = assembly_entries[0]
             manifest_info = manifest_entries[0]
             managed_prefix = assembly_info.filename.rsplit("/", 1)[0] + "/"
+            renamed_entries = sorted(
+                (info.filename, renamed_entry(info.filename))
+                for info in source.infolist()
+                if renamed_entry(info.filename) != info.filename
+            )
 
             for info in source.infolist():
                 if info.filename.startswith(managed_prefix) and not info.is_dir():
@@ -168,7 +195,7 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
                         copy_zip_entry(source, info, destination)
 
                 hook_info = zipfile.ZipInfo(
-                    f"{data_prefix}Managed/{HOOK_NAME}",
+                    renamed_entry(f"{data_prefix}Managed/{HOOK_NAME}"),
                     assembly_info.date_time,
                 )
                 hook_info.compress_type = zipfile.ZIP_DEFLATED
@@ -182,9 +209,9 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
                     raise RuntimeError(f"output zip verification failed: {bad_file}")
                 names = set(verification.namelist())
                 expected = {
-                    assembly_info.filename,
-                    manifest_info.filename,
-                    f"{data_prefix}Managed/{HOOK_NAME}",
+                    renamed_entry(assembly_info.filename),
+                    renamed_entry(manifest_info.filename),
+                    renamed_entry(f"{data_prefix}Managed/{HOOK_NAME}"),
                 }
                 if not expected.issubset(names):
                     raise RuntimeError("output zip is missing patched entries")
@@ -192,6 +219,10 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
             temporary_output.replace(output_path)
 
     print(f"patched {output_path} ({output_path.stat().st_size} bytes)")
+    if renamed_entries:
+        print(f"renamed {len(renamed_entries)} entries to Donkey Sim naming, e.g.:")
+        for old_name, new_name in renamed_entries[:5]:
+            print(f"  {old_name} -> {new_name}")
     print(f"sha256 {sha256(output_path)}")
 
 

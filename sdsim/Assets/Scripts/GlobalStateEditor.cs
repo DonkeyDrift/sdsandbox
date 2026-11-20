@@ -144,11 +144,21 @@ public class GlobalStateEditor : MonoBehaviour
         int width = (int)(rect.width * Screen.width);
         int height = (int)(rect.height * Screen.height);
 
-        // worst case: every optional section expanded, including the version banner
-        int totalRows = 29;
-        int rowHeight = Mathf.Max(height / totalRows, 8);
+        // count the rows actually drawn this frame so the font can use the
+        // real available height instead of a worst-case guess
+        int totalRows = 18;
+        if (paceCar)
+        {
+            totalRows += 1;
+            if (!manualDriving) totalRows += 3;
+        }
+        if (useSeed) totalRows += 1;
+        if (showPrivateKey) totalRows += 2;
 
-        int fontSize = Mathf.Clamp(Mathf.Min(Mathf.RoundToInt(rowHeight / 1.7f), Mathf.RoundToInt(width / 20f)), 9, 30);
+        // keep every size relative to the panel so the text scales with the
+        // window the same way on 1x and 2x displays
+        int rowHeight = Mathf.Max(height / totalRows, 8);
+        int fontSize = Mathf.Clamp(Mathf.RoundToInt(Mathf.Min(rowHeight / 1.7f, width / 16f)), 9, Mathf.RoundToInt(rowHeight / 1.55f));
         if (fontSize != cachedFontSize)
         {
             cachedFontSize = fontSize;
@@ -158,7 +168,7 @@ public class GlobalStateEditor : MonoBehaviour
             settingsButtonStyle = new GUIStyle(GUI.skin.button) { fontSize = fontSize };
         }
 
-        int LabelXOffset = Mathf.RoundToInt(width * 0.55f);
+        int LabelXOffset = Mathf.RoundToInt(width * 0.58f);
 
         int YOffset = 0;
         int Ysteps = rowHeight;
