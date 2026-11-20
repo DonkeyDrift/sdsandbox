@@ -1,0 +1,32 @@
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9301 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/utils.py:573: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:209.)
+  return th.as_tensor(obs, device=device)
+[rl_eval] 连接 127.0.0.1:9301 sync=False state_obs=False level=mountain_track
+starting DonkeyGym env
+Setting default: frame_skip 1
+Setting default: log_level 20
+Setting default: steer_limit 1.0
+Setting default: throttle_min 0.0
+Setting default: throttle_max 1.0
+Setting default: done_on_flip True
+Setting default: done_on_stuck True
+Setting default: stuck_time_thresh 2.5
+[rl_eval] ep0 (seed=8200): reward=211.6 steps=172 -> terminated(cte=2.84 hit=none flipped=False stuck=0.0 lap=0 pos=(0.700545728206635, 0.334427416324615, 12.448052406311))
+[rl_eval] ep1 (seed=8201): reward=122.3 steps=2500 -> max_steps
+[rl_eval] ep2 (seed=8202): reward=156.2 steps=133 -> terminated(cte=2.64 hit=none flipped=False stuck=0.0 lap=0 pos=(0.302772253751755, 0.326005399227142, 12.505765914917))
+[rl_eval] ep3 (seed=8203): reward=23.8 steps=155 -> terminated(cte=2.51 hit=none flipped=False stuck=0.0 lap=0 pos=(-0.00072913063922897, 0.533452570438385, 1.06305515766144))
+[rl_eval] ep4 (seed=8204): reward=101.3 steps=98 -> terminated(cte=2.88 hit=none flipped=False stuck=0.0 lap=0 pos=(0.338574796915054, 0.323299914598465, 12.4738025665283))
+[rl_eval] ep5 (seed=8205): reward=-0.2 steps=2500 -> max_steps
+[rl_eval] ep6 (seed=8206): reward=248.7 steps=536 -> terminated(cte=-2.53 hit=none flipped=False stuck=0.0 lap=1 pos=(7.11046743392944, 0.66730010509491, 2.89763474464417))
+[rl_eval] ep7 (seed=8207): reward=-0.2 steps=2500 -> max_steps
+[rl_eval] ep8 (seed=8208): reward=27.0 steps=161 -> terminated(cte=2.71 hit=none flipped=False stuck=0.0 lap=0 pos=(0.647591352462769, 0.334999889135361, 12.4702281951904))
+[rl_eval] ep9 (seed=8209): reward=69.3 steps=833 -> terminated(cte=2.64 hit=none flipped=False stuck=0.0 lap=0 pos=(-2.74296426773071, 0.710825622081757, 6.66673946380615))
+[rl_eval] 平均 reward=96.0 平均步数=959 (1 步=0.05s 仿真)
+RL_EVAL_JSON {"episodes": 10, "avg_reward": 96.0, "avg_steps": 958.8, "crash_episodes": 7, "crash_rate": 0.7, "laps": 1, "max_steps": 2500, "seeds": [8200, 8201, 8202, 8203, 8204, 8205, 8206, 8207, 8208, 8209]}

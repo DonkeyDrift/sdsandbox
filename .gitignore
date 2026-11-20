@@ -69,3 +69,38 @@ dataset
 /src/camera_b.png
 /sdsim/Assets/StreamingAssets
 /sdsim/Assets/AssetBundles
+
+# 本地构建产物
+build/
+dist/
+
+# RL/BC 产物(2026-10-30 约定):模型二进制与 BC 数据集不进 git(remote 为 GitHub,单文件 >100MB 拒收),
+#   但必须随交接包(7z 全仓快照)流转——打包含 outputs/rl_* 模型集与 outputs/bc_* 数据集,细则见 AGENTS.md「模型交接约定」;
+#   git 只收文档(journal/review/报告)与代码;日志/tb/录屏/回放/崩溃现场留本地
+outputs/*.zip
+outputs/rl_halloffame/
+outputs/rl_ckpt_*/
+outputs/rl_best_*/
+outputs/rl_tb*/
+outputs/rl_ppo_ckpt/
+outputs/rl_best/
+outputs/*.log
+outputs/unitylog_*.txt
+outputs/*.crash
+outputs/*.jsonl
+outputs/rec_*/
+outputs/rl_replay_*/
+outputs/reeval_*_frames/
+outputs/rl_export/
+outputs/bc_data*/
+outputs/bc_*probe*/
+outputs/bc_data_probe.npz
+outputs/bc_probe_montage.jpg
+# HBC(2026-10-30):1.0G mycar tub→npz 数据集随交接包流转;蒙太奇拼贴证据留本地
+outputs/bc_human_data/
+outputs/hbc_*.jpg
+# V3-ANCHOR(2026-10-31):vision3 自锚数据集随交接包流转
+outputs/bc_v3anchor/
+outputs/bc_v3anchor_probe.npz
+outputs/bc_v3anchor_probe_*montage*.jpg
+build_cpp/

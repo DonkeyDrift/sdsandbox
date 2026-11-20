@@ -1,0 +1,6 @@
+[gate1] connected, car_loaded, car_config(ctl_step_ms=20) + cam_config(img_enc none) sent
+[gate1] post-reset frame: cte=0.714588 speed=0.00149868 pos=(0.00343017,0.702881,8.14307)
+[gate1] field presence: all present
+[gate1] telemetry inter-arrival (ms) n=300 mean=19.9996 std=4.08194 p50=16.7327 p95=25.0692 p99=25.1468
+[gate1] client proc recv->send (ms) n=300 mean=0.0129112 std=0.00307854 p50=0.01225 p95=0.018292 p99=0.024583
+[gate1] frame_id monotonic +1: OK

@@ -43,10 +43,52 @@ namespace tk
 
         int iActiveSpan = 0;
 
+        public bool RlMode { get; private set; }
+        float controlTimeoutMs = 0f;
+        DateTime lastControlRecvTime = DateTime.UtcNow;
+        bool deadmanTriggered = false;
+        uint frameId = 0;
+        int lapCount = 0;
+        int lastActiveNode = -1;
+        int resetNodeIndex = -1;
+        int resetNodeMin = 0;
+        int resetNodeMax = -1;
+        float resetLateralOffset = 0f;
+        float resetHeadingNoise = 0f;
+        int? resetSeed = null;
+        Car carComp0;
+
+        // cam_config fps 键联动的渲染锁帧标记(见 SetCamConfig/OnDestroy)
+        bool renderFpsLockedByUs = false;
+
         bool asynchronous = true;
         float time_step = 0.1f;
+        // ---- 量化异步控制(car_config ctl_step_ms>0 且异步模式开启)----
+        // 相位协议:控制不在收包瞬间生效,缓存到物理步进网格(Time.time 对齐,
+        // fixedDeltaTime 网格天然整除)的控制边界统一应用;遥测同边界发送——
+        // 先 SendTelemetry(上一动作已完整持有一个步长的状态)再应用新动作,
+        // 与同步步进 time_step=ctl_step 的动作-观测配对逐比特同构,但物理在
+        // 边界间实时自由推进。同步训练的策略因此无需重训即可异步驾驶。
+        // 由 FixedUpdate(物理驱动,不依附渲染循环)推进边界,headless 亦精确。
+        float ctlStepSec = 0f;           // 0=关闭,保持收包即生效的旧行为
+        float nextCtlBoundary = -1f;     // 下一控制/遥测边界(Time.time)
+        bool ctlBuffered = false;        // 有未应用到轮上的控制
+        float pendSteer, pendThrottle, pendBrake;
         bool bResetCar = false;
+        bool bResetToNearest = false;
         bool bExitScene = false;
+        float savedTimeScale = 1f;
+        float syncFixedDt = 0.01f;
+        int pendingSteps = 0;
+        bool syncCapturePending = false;
+        int syncKickedFrame = 0;
+        // 窗口观赏:同步控制步的 k 个物理子步摊到连续渲染帧并按实时配速,
+        // 世界逐帧连续推进,消除"整步突发→冻结"的窜动;子步序列与突发模式
+        // 完全一致(同次数同时长的 Simulate),遥测内容不受影响。
+        // batchmode 无渲染循环,保持突发逻辑保住训练吞吐。
+        bool syncSpread = false;
+        int spreadRemaining = 0;
+        float spreadNextAllowed = 0f;
 
         public enum State
         {
@@ -60,6 +102,7 @@ namespace tk
         {
             car = carObj.GetComponent<ICar>();
             conf = carObj.GetComponent<CarConfig>();
+            carComp0 = car as Car;
             pm = GameObject.FindObjectOfType<PathManager>();
             carSpawner = GameObject.FindObjectOfType<CarSpawner>();
             Canvas canvas = GameObject.FindObjectOfType<Canvas>();
@@ -85,6 +128,7 @@ namespace tk
             client.dispatcher.Register("control", new tk.Delegates.OnMsgRecv(OnControlsRecv));
             client.dispatcher.Register("exit_scene", new tk.Delegates.OnMsgRecv(OnExitSceneRecv));
             client.dispatcher.Register("reset_car", new tk.Delegates.OnMsgRecv(OnResetCarRecv));
+            client.dispatcher.Register("reset_to_nearest", new tk.Delegates.OnMsgRecv(OnResetToNearestRecv));
             client.dispatcher.Register("step_mode", new tk.Delegates.OnMsgRecv(OnStepModeRecv));
             client.dispatcher.Register("quit_app", new tk.Delegates.OnMsgRecv(OnQuitApp));
             client.dispatcher.Register("regen_road", new tk.Delegates.OnMsgRecv(OnRegenRoad));
@@ -94,6 +138,7 @@ namespace tk
             client.dispatcher.Register("lidar_config", new tk.Delegates.OnMsgRecv(OnLidarConfig));
             client.dispatcher.Register("set_position", new tk.Delegates.OnMsgRecv(OnSetPosition));
             client.dispatcher.Register("node_position", new tk.Delegates.OnMsgRecv(OnNodePositionRecv));
+            client.dispatcher.Register("time_scale", new tk.Delegates.OnMsgRecv(OnTimeScaleRecv));
         }
 
         public void Start()
@@ -109,8 +154,22 @@ namespace tk
 
         public void OnDestroy()
         {
+            // 恢复 cam_config fps 键联动的渲染锁帧(SetCamConfig),还原为
+            // SandboxServer 启动时的全局上限。
+            if (renderFpsLockedByUs)
+            {
+                renderFpsLockedByUs = false;
+                Application.targetFrameRate = GlobalState.max_fps;
+            }
+
             if (client != null && client.dispatcher != null)
                 client.dispatcher.Reset();
+
+            if (!asynchronous)
+            {
+                Physics.autoSimulation = true;
+                Time.timeScale = savedTimeScale;
+            }
         }
 
         void Disconnect()
@@ -141,13 +200,181 @@ namespace tk
             if (client == null)
                 return;
 
+            frameId++;
+
+            // 非 JPG 编码(Logger/PNG/TGA 场景)不在性能关键路径,走旧 JSONObject 路径
+            if (camSensor.img_enc != "JPG")
+            {
+                SendTelemetryLegacy();
+                return;
+            }
+
+            byte[] buf = client.RentSendBuffer();
+            if (buf == null)
+            {
+                // 发送池耗尽(客户端严重反压):遥测是实时数据,丢帧优于积压旧帧
+                _txDrops++;
+                return;
+            }
+            _txBuf = buf;
+            _txLen = 0;
+            _txOverflow = false;
+
+            TxAscii("{\"msg_type\":\"telemetry\"");
+            TxAscii(",\"steering_angle\":"); TxNum(car.GetSteering() / steer_to_angle);
+            TxAscii(",\"throttle\":"); TxNum(car.GetThrottle());
+
+            if (camSensor.captureEnabled)
+            {
+                TxAscii(",\"image\":");
+                if (!TxBase64Image(camSensor)) { AbortTx(buf); SendTelemetryLegacy(); return; }
+            }
+
+            if (camSensorB != null && camSensorB.gameObject.activeInHierarchy)
+            {
+                TxAscii(",\"imageb\":");
+                if (!TxBase64Image(camSensorB)) { AbortTx(buf); SendTelemetryLegacy(); return; }
+            }
+
+            if (lidar != null && lidar.gameObject.activeInHierarchy)
+            {
+                TxAscii(",\"lidar\":");
+                TxAscii(lidar.GetOutputAsJson().ToString());
+            }
+
+            foreach (Odometry o in odom)
+            {
+                TxAscii(",\""); TxAscii(o.Label); TxAscii("\":"); TxNum(o.GetNumberRotations());
+            }
+
+            TxAscii(",\"hit\":\""); TxAscii(car.GetLastCollision()); TxAscii("\"");
+            car.ClearLastCollision();
+
+            TxAscii(",\"frame_id\":"); TxAscii(frameId.ToString(CultureInfo.InvariantCulture));
+            float collImpulse = carComp0 != null ? carComp0.LastCollisionImpulse : 0f;
+            if (carComp0 != null) carComp0.ClearLastCollisionImpulse();
+            TxAscii(",\"collision_impulse\":"); TxNum(collImpulse);
+            TxAscii(",\"flipped\":"); TxAscii(carComp0 != null && carComp0.IsFlipped ? "true" : "false");
+            TxAscii(",\"stuck_time\":"); TxNum(carComp0 != null ? carComp0.StuckTime : 0f);
+
+            TxAscii(",\"time\":"); TxNum(Time.timeSinceLevelLoad);
+
+            Vector3 velocity = car.GetVelocity() / 8.0f;
+            TxAscii(",\"speed\":"); TxNum(velocity.magnitude);
+
+            Vector3 accel = car.GetAccel() / 8.0f;
+            TxAscii(",\"accel_x\":"); TxNum(accel.x);
+            TxAscii(",\"accel_y\":"); TxNum(accel.y);
+            TxAscii(",\"accel_z\":"); TxNum(accel.z);
+
+            Vector3 gyro = car.GetGyro();
+            TxAscii(",\"gyro_x\":"); TxNum(gyro.x);
+            TxAscii(",\"gyro_y\":"); TxNum(gyro.y);
+            TxAscii(",\"gyro_z\":"); TxNum(gyro.z);
+
+            Transform tm = car.GetTransform();
+            Vector3 eulerAngles = tm.rotation.eulerAngles;
+            TxAscii(",\"pitch\":"); TxNum(eulerAngles.x);
+            TxAscii(",\"yaw\":"); TxNum(eulerAngles.y);
+            TxAscii(",\"roll\":"); TxNum(eulerAngles.z);
+
+            if (pm != null)
+            {
+                float cte = 0.0f;
+                pm.carPath.GetCrossTrackErr(tm.position, ref iActiveSpan, ref cte); // get distance to closest node
+                if (GlobalState.extendedTelemetry) { TxAscii(",\"cte\":"); TxNum(cte); }
+
+                TxAscii(",\"activeNode\":"); TxNum(iActiveSpan);
+                int totalNodes = pm.carPath.nodes.Count;
+                TxAscii(",\"totalNodes\":"); TxNum(totalNodes);
+
+                if (totalNodes > 0 && lastActiveNode > totalNodes * 0.9f && iActiveSpan < totalNodes * 0.1f)
+                    lapCount++;
+                lastActiveNode = iActiveSpan;
+            }
+
+            // not intended to use in races, just to train
+            if (GlobalState.extendedTelemetry)
+            {
+                Vector3 pos = tm.position / 8.0f;
+                TxAscii(",\"pos_x\":"); TxNum(pos.x);
+                TxAscii(",\"pos_y\":"); TxNum(pos.y);
+                TxAscii(",\"pos_z\":"); TxNum(pos.z);
+
+                TxAscii(",\"vel_x\":"); TxNum(velocity.x);
+                TxAscii(",\"vel_y\":"); TxNum(velocity.y);
+                TxAscii(",\"vel_z\":"); TxNum(velocity.z);
+            }
+            TxAscii(",\"lap\":"); TxNum(lapCount);
+            TxAscii("}\n");
+
+            if (_txOverflow)
+            {
+                // 报文超出发送缓冲(lidar 等可变长字段):回退旧路径,不发送截断包
+                AbortTx(buf);
+                SendTelemetryLegacy();
+                return;
+            }
+
+            if (!client.SendRaw(buf, _txLen))
+                _txDrops++;
+        }
+
+        // ---- 零分配遥测拼包 ----
+        // 旧路径 JSONObject.ToString+Convert.ToBase64String+UTF8.GetBytes 每帧产生
+        // ~3x 报文大小的临时大对象(640x480@60fps ≈ 25MB/s 垃圾),非增量 GC 全停
+        // 主线程,表现为窗口不定时卡顿闪动。新路径:池化发送缓冲(TcpClient)+
+        // ToBase64CharArray+手工 ASCII 拼包,每帧仅剩几十字节的数字格式化小对象。
+        // 字段名/顺序/类型与旧路径逐一对齐(见 SendTelemetryLegacy)。
+        char[] _b64Chars;       // 池化 base64 字符缓冲,按需扩容
+        byte[] _txBuf;          // 当前租用的发送缓冲
+        int _txLen;
+        bool _txOverflow;       // 拼包越界标志(缓冲不足时后续写入变 no-op,整体回退旧路径)
+        long _txDrops;          // 拼包侧丢弃的遥测帧数(TelemetryStats 输出)
+
+        void TxAscii(string s)
+        {
+            if (_txOverflow || _txLen + s.Length > _txBuf.Length) { _txOverflow = true; return; }
+            for (int i = 0; i < s.Length; i++) _txBuf[_txLen++] = (byte)s[i];
+        }
+        void TxNum(double v) { TxAscii(v.ToString(CultureInfo.InvariantCulture)); }
+        void TxNum(int v) { TxAscii(v.ToString(CultureInfo.InvariantCulture)); }
+
+        bool TxBase64Image(CameraSensor sensor)
+        {
+            // 容量上界:JPEG <= w*h*3(RGB 原始大小,实际远小于此)
+            int need = 4 * ((sensor.width * sensor.height * 3 + 2) / 3) + 16;
+            if (_b64Chars == null || _b64Chars.Length < need)
+                _b64Chars = new char[need];
+            int n = sensor.GetLatestJpgBase64(_b64Chars);
+            if (n < 0 || _txLen + n + 2 >= _txBuf.Length)
+                return false;
+            _txBuf[_txLen++] = (byte)'"';
+            for (int i = 0; i < n; i++)
+                _txBuf[_txLen++] = (byte)_b64Chars[i];
+            _txBuf[_txLen++] = (byte)'"';
+            return true;
+        }
+
+        void AbortTx(byte[] buf)
+        {
+            client.ReturnSendBuffer(buf);
+            _txBuf = null;
+            _txLen = 0;
+            _txDrops++;
+        }
+
+        // 旧 JSONObject 发送路径:非 JPG 编码或零分配路径异常时回退,行为不变。
+        void SendTelemetryLegacy()
+        {
             JSONObject json = new JSONObject(JSONObject.Type.OBJECT);
             json.AddField("msg_type", "telemetry");
 
             json.AddField("steering_angle", car.GetSteering() / steer_to_angle);
             json.AddField("throttle", car.GetThrottle());
 
-            json.AddField("image", Convert.ToBase64String(camSensor.GetImageBytes()));
+            if (camSensor.captureEnabled)
+                json.AddField("image", Convert.ToBase64String(camSensor.GetImageBytes()));
 
             if (camSensorB != null && camSensorB.gameObject.activeInHierarchy)
             {
@@ -167,6 +394,14 @@ namespace tk
 
             json.AddField("hit", car.GetLastCollision());
             car.ClearLastCollision();
+
+            json.AddField("frame_id", (int)frameId);
+            float collImpulse = carComp0 != null ? carComp0.LastCollisionImpulse : 0f;
+            if (carComp0 != null) carComp0.ClearLastCollisionImpulse();
+            json.AddField("collision_impulse", collImpulse);
+            json.AddField("flipped", carComp0 != null && carComp0.IsFlipped);
+            json.AddField("stuck_time", carComp0 != null ? carComp0.StuckTime : 0f);
+
             json.AddField("time", Time.timeSinceLevelLoad);
 
             Vector3 velocity = car.GetVelocity() / 8.0f;
@@ -195,10 +430,15 @@ namespace tk
                 if (GlobalState.extendedTelemetry) { json.AddField("cte", cte); }
 
                 json.AddField("activeNode", iActiveSpan);
-                json.AddField("totalNodes", pm.carPath.nodes.Count);
+                int totalNodes = pm.carPath.nodes.Count;
+                json.AddField("totalNodes", totalNodes);
+
+                if (totalNodes > 0 && lastActiveNode > totalNodes * 0.9f && iActiveSpan < totalNodes * 0.1f)
+                    lapCount++;
+                lastActiveNode = iActiveSpan;
             }
 
-            // not intended to use in races, just to train 
+            // not intended to use in races, just to train
             if (GlobalState.extendedTelemetry)
             {
                 Vector3 pos = tm.position / 8.0f;
@@ -210,6 +450,7 @@ namespace tk
                 json.AddField("vel_y", velocity.y);
                 json.AddField("vel_z", velocity.z);
             }
+            json.AddField("lap", lapCount);
             client.SendMsg(json);
         }
 
@@ -238,6 +479,9 @@ namespace tk
         {
             try
             {
+                lastControlRecvTime = DateTime.UtcNow;
+                deadmanTriggered = false;
+
                 ai_steering = float.Parse(json["steering"].str, CultureInfo.InvariantCulture.NumberFormat);
                 ai_throttle = float.Parse(json["throttle"].str, CultureInfo.InvariantCulture.NumberFormat);
                 ai_brake = float.Parse(json["brake"].str, CultureInfo.InvariantCulture.NumberFormat);
@@ -248,9 +492,23 @@ namespace tk
 
                 ai_steering *= steer_to_angle;
 
-                car.RequestSteering(ai_steering);
-                car.RequestThrottle(ai_throttle);
-                car.RequestFootBrake(ai_brake);
+                if (ctlStepSec > 0f && asynchronous)
+                {
+                    // 量化模式:缓存到下一控制边界统一应用,而非收包瞬间生效
+                    pendSteer = ai_steering;
+                    pendThrottle = ai_throttle;
+                    pendBrake = ai_brake;
+                    ctlBuffered = true;
+                }
+                else
+                {
+                    car.RequestSteering(ai_steering);
+                    car.RequestThrottle(ai_throttle);
+                    car.RequestFootBrake(ai_brake);
+                }
+
+                if (!asynchronous)
+                    System.Threading.Interlocked.Increment(ref pendingSteps);
             }
             catch (Exception e)
             {
@@ -265,12 +523,59 @@ namespace tk
 
         void ExitScene()
         {
-            SceneManager.LoadSceneAsync(0);
+            // 启动场景已改为 mountain_track(见 EditorBuildSettings),
+            // 返回前端菜单必须按名字加载,不能再用 build index 0。
+            SceneManager.LoadSceneAsync("menu");
+        }
+
+        // RL 客户端常发未加引号的 JSON 数字(NUMBER 型 .str 为 null),字符串/数字两种都要能收。
+        static float NumField(JSONObject json, string name, float defVal)
+        {
+            JSONObject f = json.GetField(name);
+            if (f == null)
+                return defVal;
+            if (f.str != null)
+            {
+                float v;
+                if (float.TryParse(f.str, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
+                    return v;
+                return defVal;
+            }
+            return f.IsNumber ? (float)f.n : defVal;
         }
 
         void OnResetCarRecv(JSONObject json)
         {
+            resetNodeIndex = -1;
+            resetNodeMin = 0;
+            resetNodeMax = -1;
+            resetLateralOffset = 0f;
+            resetHeadingNoise = 0f;
+            resetSeed = null;
+
+            resetNodeIndex = (int)NumField(json, "node_index", -1f);
+            resetNodeMin = (int)NumField(json, "node_min", 0f);
+            resetNodeMax = (int)NumField(json, "node_max", -1f);
+            resetLateralOffset = NumField(json, "lateral_offset", 0f);
+            resetHeadingNoise = NumField(json, "heading_noise", 0f);
+            if (json.HasField("seed"))
+                resetSeed = (int)NumField(json, "seed", 0f);
+
             bResetCar = true;
+        }
+
+        void OnTimeScaleRecv(JSONObject json)
+        {
+            float v = NumField(json, "time_scale", 1.0f);
+            v = clamp(v, 0.1f, 4.0f);
+            Time.timeScale = v;
+        }
+
+        // 就近回位到赛道中央并摆正(与本地 R 键同一逻辑,见 CarRecovery)。
+        // 旧版模拟器未注册此消息时由 Dispatcher 静默忽略,不崩溃。
+        void OnResetToNearestRecv(JSONObject json)
+        {
+            bResetToNearest = true;
         }
 
         void OnRegenRoad(JSONObject json)
@@ -320,6 +625,36 @@ namespace tk
             string car_name = json.GetField("car_name").str;
             int font_size = 100;
 
+            RlMode = GlobalState.rlMode || (int)NumField(json, "rl_mode", 0f) == 1;
+            controlTimeoutMs = NumField(json, "control_timeout_ms", 0f);
+
+            // 人驾 BC 录制模式:不重spawn(架构上每个 TCP 连接已 spawn 专属车),
+            // 而是把本 handler 重绑到本地玩家车(cars[0],JoystickCarControl 驱动)。
+            // 之后遥测/图像/回显全部来自人驾车的真实状态;客户端只收不发控制。
+            if ((int)NumField(json, "observe_player", 0f) == 1)
+            {
+                var spawner2 = GameObject.FindObjectOfType<CarSpawner>();
+                if (spawner2 != null && spawner2.cars.Count > 0)
+                {
+                    GameObject player = spawner2.cars[0];
+                    carObj = player;
+                    car = player.GetComponent<ICar>();
+                    conf = player.GetComponent<CarConfig>();
+                    carComp0 = car as Car;
+                    camSensor = player.GetComponentInChildren<CameraSensor>();
+                    camSensorB = null;
+                    if (pm != null)
+                        iActiveSpan = pm.carPath.GetClosestSpanIndex(player.transform.position);
+                    Debug.Log("[TcpCarHandler] observe_player: handler 已重绑到本地玩家车");
+                }
+            }
+
+            // 量化异步控制(car_config "ctl_step_ms": 数值,毫秒;0/缺省=旧行为)
+            float ctlStepMs = NumField(json, "ctl_step_ms", 0f);
+            ctlStepSec = ctlStepMs > 0f ? Mathf.Max(ctlStepMs / 1000f, 0.01f) : 0f;
+            nextCtlBoundary = -1f;
+            ctlBuffered = false;
+
             if (json.GetField("font_size") != null)
                 font_size = int.Parse(json.GetField("font_size").str);
 
@@ -366,14 +701,35 @@ namespace tk
             int img_h = int.Parse(json.GetField("img_h").str);
             int img_d = int.Parse(json.GetField("img_d").str);
             string img_enc = json.GetField("img_enc").str;
+            // 可选遥测推流帧率(默认 20 维持旧行为;>0 时覆盖 limitFPS)
+            float fps = 0f;
+            if (json.HasField("fps")) { fps = float.Parse(json.GetField("fps").str, CultureInfo.InvariantCulture.NumberFormat); }
 
             if (carObj != null)
-                UnityMainThreadDispatcher.Instance().Enqueue(SetCamConfig(iCamera, fov, offset_x, offset_y, offset_z, rot_x, rot_y, rot_z, img_w, img_h, img_d, img_enc, fish_eye_x, fish_eye_y));
+                UnityMainThreadDispatcher.Instance().Enqueue(SetCamConfig(iCamera, fov, offset_x, offset_y, offset_z, rot_x, rot_y, rot_z, img_w, img_h, img_d, img_enc, fish_eye_x, fish_eye_y, fps));
         }
 
         IEnumerator SetCamConfig(int iCamera, float fov, float offset_x, float offset_y, float offset_z, float rot_x,
-            float rot_y, float rot_z, int img_w, int img_h, int img_d, string img_enc, float fish_eye_x, float fish_eye_y)
+            float rot_y, float rot_z, int img_w, int img_h, int img_d, string img_enc, float fish_eye_x, float fish_eye_y,
+            float fps = 0f)
         {
+            // cam_config 的 fps 键:遥测推流帧率。必须在主线程应用(发送节流在
+            // Update 里读 limitFPS)。<=0 保持默认 20 不变,向后兼容。
+            if (fps > 0f)
+            {
+                limitFPS = fps;
+                // 遥测发送节流挂在 Update(渲染循环)。渲染帧率与遥测帧率不成
+                // 整数倍时门控出帧拍频(渲染 ~80fps + 60Hz 门控 → 12/22ms 交替),
+                // 抖动沿链路直达浏览器 jitter buffer(实测贡献 ~13ms)。锁渲染到
+                // 请求帧率:帧时间 >= 门控间隔后每个 Update 都过门,出帧间隔天然
+                // 均匀。多客户端共享全局,后到覆盖;本车销毁时恢复(OnDestroy)。
+                if (!renderFpsLockedByUs && !GlobalState.rlMode)
+                {
+                    renderFpsLockedByUs = true;
+                    Application.targetFrameRate = (int)Mathf.Round(fps);
+                }
+            }
+
             CameraSensor cam = null;
 
             if (iCamera == 0)
@@ -473,21 +829,41 @@ namespace tk
         void OnStepModeRecv(JSONObject json)
         {
             string step_mode = json.GetField("step_mode").str;
-            float _time_step = float.Parse(json.GetField("time_step").str);
-
-            Debug.Log("got settings");
+            float _time_step = NumField(json, "time_step", 0.05f);
 
             if (step_mode == "synchronous")
             {
-                Debug.Log("setting mode to synchronous");
                 asynchronous = false;
-                this.time_step = _time_step;
+                this.time_step = _time_step > 0f ? _time_step : 0.05f;
+                syncFixedDt = Time.fixedDeltaTime;
+                savedTimeScale = Time.timeScale;
                 Time.timeScale = 0.0f;
+                Physics.autoSimulation = false;
+                pendingSteps = 0;
+                syncCapturePending = false;
+                syncSpread = !Application.isBatchMode;
+                spreadRemaining = 0;
+                spreadNextAllowed = Time.unscaledTime;
+                // 手动 Simulate + timeScale=0 下 Unity 插值时钟不推进,开着会让
+                // 车身相对真实姿态逐步振荡(实测恶化)——同步模式必须关。
+                if (carComp0 != null && carComp0.rb != null)
+                    carComp0.rb.interpolation = RigidbodyInterpolation.None;
+                Debug.Log(string.Format("[TcpCarHandler] synchronous mode, time_step={0}", this.time_step));
+                Debug.LogWarning("[TcpCarHandler] synchronous mode is instance-global; use one RL client per sim instance");
             }
             else
             {
-                Debug.Log("setting mode to asynchronous");
                 asynchronous = true;
+                Physics.autoSimulation = true;
+                Time.timeScale = savedTimeScale;
+                pendingSteps = 0;
+                syncCapturePending = false;
+                syncSpread = false;
+                spreadRemaining = 0;
+                // 恢复常规渲染插值(异步连续物理下消除跳步感)
+                if (carComp0 != null && carComp0.rb != null)
+                    carComp0.rb.interpolation = RigidbodyInterpolation.Interpolate;
+                Debug.Log("[TcpCarHandler] asynchronous mode");
             }
         }
 
@@ -507,7 +883,7 @@ namespace tk
 
         public void OnNodePositionRecv(JSONObject json)
         {
-            int index = int.Parse(json.GetField("index").str);
+            int index = (int)NumField(json, "index", -1f);
             if (pm != null && index >= 0 && index < pm.carPath.nodes.Count)
             {
                 PathNode node = pm.carPath.nodes[index];
@@ -549,28 +925,55 @@ namespace tk
             {
                 if (bResetCar)
                 {
-                    car.RestorePosRot();
-
-                    if (carObj != null)
-                    {
-                        //reset last controls
-                        car.RequestSteering(0.0f);
-                        car.RequestThrottle(0.0f);
-                        car.RequestFootBrake(10.0f);
-
-                        // Reset closest point of car path
-                        if (pm)
-                            iActiveSpan = 0;
-                    }
-
+                    DoResetCar(false);
                     bResetCar = false;
+                    ctlBuffered = false; // 复位后丢弃过期缓存控制
+                    nextCtlBoundary = -1f; // 边界相位重新对齐,首个完整步长后再发遥测
                 }
 
-                timeSinceLastCapture += Time.fixedDeltaTime;
-                if (timeSinceLastCapture >= 1.0f / limitFPS)
+                if (bResetToNearest)
                 {
-                    timeSinceLastCapture -= (1.0f / limitFPS);
-                    SendTelemetry();
+                    if (ctlStepSec > 0f)
+                    {
+                        // 量化模式同 SetImmediate 落定;手动 Simulate 需临时关 autoSimulation
+                        bool auto2 = Physics.autoSimulation;
+                        Physics.autoSimulation = false;
+                        DoResetToNearest(true);
+                        Physics.autoSimulation = auto2;
+                    }
+                    else
+                    {
+                        DoResetToNearest(false);
+                    }
+                    bResetToNearest = false;
+                    ctlBuffered = false;
+                    nextCtlBoundary = -1f;
+                }
+
+                // 量化异步控制:物理网格边界推进(不依附渲染循环,headless 亦精确)
+                if (asynchronous && ctlStepSec > 0f)
+                {
+                    if (nextCtlBoundary < 0f)
+                        nextCtlBoundary = Time.time + ctlStepSec;
+                    while (Time.time >= nextCtlBoundary)
+                    {
+                        // 先发遥测:状态里上一动作已完整持有一个 ctlStepSec
+                        SendTelemetry();
+                        NoteSend();
+                        if (ctlBuffered)
+                        {
+                            car.RequestSteering(pendSteer);
+                            car.RequestThrottle(pendThrottle);
+                            car.RequestFootBrake(pendBrake);
+                            if (carComp0 != null)
+                                carComp0.ApplyRequests(); // 本物理步即新动作第一个子步
+                            ctlBuffered = false;
+                        }
+                        nextCtlBoundary += ctlStepSec;
+                        // 主线程长卡顿后不补发积压边界,重新对齐,防突发补帧
+                        if (Time.time - nextCtlBoundary > 8f * ctlStepSec)
+                            nextCtlBoundary = Time.time + ctlStepSec;
+                    }
                 }
 
                 if (ai_text != null)
@@ -588,11 +991,339 @@ namespace tk
                     timeSinceLastMoved = 0.0f;
                     lastPos = currentPos;
                 }
-                if (timeSinceLastMoved >= GlobalState.timeOut && carSpawner != null)
+                if (!RlMode && GlobalState.timeOut > 0f && timeSinceLastMoved >= GlobalState.timeOut && carSpawner != null)
                 {
                     Boot();
                 }
             }
+        }
+
+        void DoResetCar(bool immediate)
+        {
+            CarPath path = pm != null ? pm.carPath : null;
+            bool randomReset = resetNodeIndex >= 0 || resetNodeMin > 0 || resetNodeMax >= 0
+                || resetLateralOffset != 0f || resetHeadingNoise != 0f || resetSeed.HasValue;
+
+            if (randomReset && path != null && path.nodes.Count > 0 && carComp0 != null)
+            {
+                int totalNodes = path.nodes.Count;
+                int lo = Mathf.Clamp(resetNodeMin, 0, totalNodes - 1);
+                int hi = resetNodeMax >= 0 ? Mathf.Min(resetNodeMax, totalNodes - 1) : totalNodes - 1;
+                if (lo > hi)
+                    lo = hi;
+
+                System.Random rng = resetSeed.HasValue ? new System.Random(resetSeed.Value) : new System.Random();
+                int iNode = resetNodeIndex >= 0 ? Mathf.Clamp(resetNodeIndex, 0, totalNodes - 1) : rng.Next(lo, hi + 1);
+                PathNode node = path.GetNode(iNode);
+
+                float hNoise = 0f;
+                if (resetHeadingNoise != 0f)
+                    hNoise = ((float)rng.NextDouble() * 2f - 1f) * resetHeadingNoise;
+
+                Vector3 tangent = node.rotation * Vector3.forward;
+                Vector3 right = Vector3.Cross(Vector3.up, tangent).normalized;
+                Vector3 pos = node.pos + right * resetLateralOffset + Vector3.up * 0.4f;
+                Quaternion rot = node.rotation * Quaternion.Euler(0f, hNoise, 0f);
+
+                // 量化异步模式:复位也要与同步逐比特一致——KeepSetting 协程不落定悬挂/
+                // 轮接触状态,高增益策略会把这点系统差放大成失稳。SetImmediate 需要手动
+                // Simulate,临时关 autoSimulation 防该帧物理双步。
+                bool quantAsync = ctlStepSec > 0f && asynchronous;
+                if (immediate || quantAsync)
+                {
+                    bool auto = Physics.autoSimulation;
+                    Physics.autoSimulation = false;
+                    carComp0.SetImmediate(pos, rot, syncFixedDt, 2);
+                    Physics.autoSimulation = auto;
+                }
+                else
+                {
+                    carComp0.rb.velocity = Vector3.zero;
+                    carComp0.rb.angularVelocity = Vector3.zero;
+                    carComp0.Set(pos, rot);
+                }
+
+                car.RequestSteering(0.0f);
+                car.RequestThrottle(0.0f);
+                car.RequestFootBrake(10.0f);
+
+                iActiveSpan = iNode;
+                lapCount = 0;
+                lastActiveNode = iNode;
+
+                Debug.Log(string.Format("[TcpCarHandler] reset_car: random reset node {0} seed {1}",
+                    iNode, resetSeed.HasValue ? resetSeed.Value.ToString() : "time"));
+            }
+            else
+            {
+                bool quantAsync2 = ctlStepSec > 0f && asynchronous;
+                if (immediate || quantAsync2)
+                {
+                    Car cc = car as Car;
+                    if (cc != null)
+                    {
+                        bool auto = Physics.autoSimulation;
+                        Physics.autoSimulation = false;
+                        cc.SetImmediate(cc.startPos, cc.startRot, syncFixedDt, 2);
+                        Physics.autoSimulation = auto;
+                    }
+                    else
+                        car.RestorePosRot();
+                }
+                else
+                {
+                    car.RestorePosRot();
+                }
+
+                if (carObj != null)
+                {
+                    //reset last controls
+                    car.RequestSteering(0.0f);
+                    car.RequestThrottle(0.0f);
+                    car.RequestFootBrake(10.0f);
+
+                    // Reset closest point of car path
+                    if (pm)
+                        iActiveSpan = 0;
+                }
+
+                lapCount = 0;
+                lastActiveNode = 0;
+            }
+        }
+
+        void DoResetToNearest(bool immediate)
+        {
+            int iNearest = -1;
+            Car carComp = car as Car;
+            if (carComp != null)
+                iNearest = CarRecovery.ResetCarToNearestPathNode(carComp, 0.4f, immediate, iActiveSpan);
+
+            if (carObj != null)
+            {
+                //reset last controls
+                car.RequestSteering(0.0f);
+                car.RequestThrottle(0.0f);
+                car.RequestFootBrake(10.0f);
+
+                // 遥测的最近路径点跟随复位目标,保持 cross-track 误差连续
+                if (pm && iNearest >= 0)
+                    iActiveSpan = iNearest;
+            }
+
+            Debug.Log("[TcpCarHandler] reset_to_nearest: node " + iNearest);
+        }
+
+        // ---- 同步步进(step_mode=synchronous) ----
+        // 进入:timeScale=0 + Physics.autoSimulation=false,FixedUpdate 不再运行;
+        // 每条 control 在主线程推进 time_step 秒物理,等相机回读完成后回一帧遥测。
+        // 物理是实例全局的,单 sim 实例只支持一个 RL 客户端(见进入时的警告日志)。
+        void SyncUpdate()
+        {
+            if (bResetCar)
+            {
+                DoResetCar(true);
+                bResetCar = false;
+                SyncPostReset();
+                return;
+            }
+
+            if (bResetToNearest)
+            {
+                DoResetToNearest(true);
+                bResetToNearest = false;
+                SyncPostReset();
+                return;
+            }
+
+            if (syncCapturePending)
+            {
+                if (camSensor != null && camSensor.captureEnabled)
+                {
+                    camSensor.Tick();
+                    if (camSensor.LastCompletedFrame >= syncKickedFrame)
+                    {
+                        syncCapturePending = false;
+                        SendTelemetry();
+                    }
+                }
+                else
+                {
+                    syncCapturePending = false;
+                    SendTelemetry();
+                }
+                return;
+            }
+
+            if (pendingSteps > 0 || (syncSpread && spreadRemaining > 0))
+            {
+                if (syncSpread)
+                    SyncStepSpread();
+                else
+                {
+                    System.Threading.Interlocked.Decrement(ref pendingSteps);
+                    SyncStep();
+                }
+            }
+        }
+
+        // 摊匀版同步步进(仅窗口模式):一个控制步的 k 个固定子步按实时配速
+        // 分到自己的渲染帧里,世界每帧最多推进 10ms,画面连续;最后子步完成
+        // 后才采集相机回读并发遥测,观测内容与突发版完全一致。
+        void SyncStepSpread()
+        {
+            if (spreadRemaining == 0)
+            {
+                System.Threading.Interlocked.Decrement(ref pendingSteps);
+                if (carComp0 != null)
+                    carComp0.ApplyRequests();
+                spreadRemaining = Mathf.Max(1, Mathf.RoundToInt(time_step / syncFixedDt));
+                // 等客户端期间时钟已走远:从当前时刻重新配速,不做补偿性追赶,
+                // 否则控制步之间会退化成突发。
+                spreadNextAllowed = Mathf.Max(spreadNextAllowed, Time.unscaledTime);
+            }
+
+            int budget = 3; // 单帧最多 3 子步:>=34fps 即可跟上 100Hz 仿真钟
+            while (spreadRemaining > 0 && budget-- > 0 && Time.unscaledTime >= spreadNextAllowed)
+            {
+                Physics.Simulate(syncFixedDt);
+                spreadNextAllowed += syncFixedDt;
+                spreadRemaining--;
+            }
+
+            if (spreadRemaining == 0)
+            {
+                if (carComp0 != null)
+                    carComp0.SyncKinematics(Mathf.Max(1, Mathf.RoundToInt(time_step / syncFixedDt)) * syncFixedDt);
+                KickSyncCapture();
+            }
+        }
+
+        void SyncStep()
+        {
+            if (carComp0 != null)
+                carComp0.ApplyRequests();
+
+            int k = Mathf.Max(1, Mathf.RoundToInt(time_step / syncFixedDt));
+            for (int i = 0; i < k; i++)
+                Physics.Simulate(syncFixedDt);
+
+            if (carComp0 != null)
+                carComp0.SyncKinematics(k * syncFixedDt);
+
+            KickSyncCapture();
+        }
+
+        void SyncPostReset()
+        {
+            if (carComp0 != null)
+                carComp0.ApplyRequests();
+
+            Physics.Simulate(syncFixedDt);
+            Physics.Simulate(syncFixedDt);
+
+            if (carComp0 != null)
+                carComp0.SyncKinematics(2f * syncFixedDt);
+
+            KickSyncCapture();
+        }
+
+        void KickSyncCapture()
+        {
+            if (camSensor != null && camSensor.captureEnabled)
+            {
+                camSensor.KickReadbackNow();
+                syncKickedFrame = camSensor.KickCount;
+                syncCapturePending = true;
+            }
+            else
+            {
+                SendTelemetry();
+            }
+        }
+
+        void Update()
+        {
+            // 遥测发送节流放渲染循环:FixedUpdate 物理 100Hz、limitFPS 提到 60
+            // 也发不满(相位错开);Update 跟随渲染帧率。帧率优先级:
+            // --telemetry_fps(服务端强制,二分用) > cam_config fps 键 > 默认 20。
+            if (state != State.SendTelemetry)
+                return;
+
+            if (!asynchronous)
+            {
+                SyncUpdate();
+                return;
+            }
+
+            if (controlTimeoutMs > 0f && !deadmanTriggered
+                && (DateTime.UtcNow - lastControlRecvTime).TotalMilliseconds > controlTimeoutMs)
+            {
+                car.RequestSteering(0.0f);
+                car.RequestThrottle(0.0f);
+                car.RequestFootBrake(1.0f);
+                ctlBuffered = false; // deadman 为安全旁路,立即生效并清缓存
+                deadmanTriggered = true;
+            }
+
+            if (camSensor != null)
+                camSensor.Tick();
+            if (camSensorB != null)
+                camSensorB.Tick();
+
+            if (!(ctlStepSec > 0f))
+            {
+                // 非量化模式:遥测节流在渲染循环(旧行为);量化模式的遥测由
+                // FixedUpdate 的物理网格边界驱动,与渲染完全解耦。
+                float effFps = GlobalState.telemetry_fps > 0f ? GlobalState.telemetry_fps : limitFPS;
+                timeSinceLastCapture += Time.deltaTime;
+                if (timeSinceLastCapture >= 1.0f / effFps)
+                {
+                    timeSinceLastCapture -= (1.0f / effFps);
+                    SendTelemetry();
+                    NoteSend();
+                }
+            }
+
+            TelemetryStats();
+        }
+
+        // ---- 遥测自检仪表(二分实验用,每 5s 一行) ----
+        float _statSendEma = 20f;   // 发送间隔倒数 EMA(实测推流 fps)
+        float _statFrameEma = 1f / 60f; // 主线程帧间隔 EMA(渲染 fps)
+        float _statLastSendAt = -1f;
+        float _statNextReportAt = 5f;
+        int _statSent;
+
+        void NoteSend()
+        {
+            float now = Time.unscaledTime;
+            _statSent++;
+            if (_statLastSendAt >= 0f)
+            {
+                float gap = now - _statLastSendAt;
+                if (gap > 0.0001f)
+                    _statSendEma = Mathf.Lerp(_statSendEma, 1f / gap, 0.05f);
+            }
+            _statLastSendAt = now;
+        }
+
+        void TelemetryStats()
+        {
+            _statFrameEma = Mathf.Lerp(_statFrameEma, Time.unscaledDeltaTime, 0.05f);
+            float now = Time.unscaledTime;
+            if (now < _statNextReportAt)
+                return;
+            _statNextReportAt = now + 5f;
+            float capMs = camSensor != null ? camSensor.LastCaptureMs : 0f;
+            long txDrops = _txDrops + (client != null ? client.PooledSendDrops : 0);
+            Debug.Log(string.Format(
+                "[telemetry-stats] send_fps={0:F1} render_fps={1:F1} capture_ms={2:F1} sent={3} tx_drop={4}",
+                _statSendEma,
+                1f / Mathf.Max(_statFrameEma, 0.00001f),
+                capMs,
+                _statSent,
+                txDrops));
         }
 
         public bool IsGhostCar()

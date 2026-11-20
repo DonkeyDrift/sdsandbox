@@ -1,0 +1,13 @@
+/Users/hwp/Dev/DKC/sdsandbox/src/bc_train.py:197: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  ep_loss += float(loss); nb += 1
+[bc] device=mps
+[bc] 数据 40000 对,局 41 个
+[bc] train 36380 / val 3620(按局段)
+[bc] ep4 loss=3.2734 | val MSE=0.2443 steerMAE=0.2930 thrMAE=0.2022 hardSteerMAE=0.4414(n=1845)
+[bc] ep9 loss=2.6951 | val MSE=0.1586 steerMAE=0.2095 thrMAE=0.1489 hardSteerMAE=0.2982(n=1845)
+[bc] ep14 loss=2.3132 | val MSE=0.1193 steerMAE=0.1633 thrMAE=0.1300 hardSteerMAE=0.2143(n=1845)
+[bc] ep19 loss=2.0401 | val MSE=0.0993 steerMAE=0.1374 thrMAE=0.1074 hardSteerMAE=0.1724(n=1845)
+[bc] ep24 loss=1.8336 | val MSE=0.0961 steerMAE=0.1272 thrMAE=0.1047 hardSteerMAE=0.1648(n=1845)
+[bc] 终验: val steerMAE=0.1272 hardSteerMAE=0.1648 thrMAE=0.1047(首跑标定,无先验门)
+[bc] 导出 outputs/rl_bc_cat.zip(rl_eval 零改动可评测)

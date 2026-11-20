@@ -1,0 +1,43 @@
+{
+  "source_model": "/Users/hwp/Dev/DKC/sdsandbox/outputs/rl_halloffame/20261018-0505_champion2-1M-acc10-avg2500-crash0-laps39.zip",
+  "obs_vector": [
+    [
+      "cte/2.0",
+      "横向偏差(米),赛道中心线坐标系,左正右负"
+    ],
+    [
+      "speed/10.0",
+      "车速(米/秒,标量)"
+    ],
+    [
+      "forward_vel/10.0",
+      "前向速度(米/秒)"
+    ],
+    [
+      "yaw/180.0",
+      "偏航角(度)"
+    ],
+    [
+      "gyro_z/90.0",
+      "偏航角速度(度/秒)"
+    ],
+    [
+      "active_node/max(total_nodes,1)",
+      "赛道进度 [0,1]"
+    ],
+    [
+      "0.0",
+      "保留"
+    ],
+    [
+      "0.0",
+      "保留"
+    ]
+  ],
+  "action": [
+    "steering [-1,1] 左正",
+    "throttle [0,1]"
+  ],
+  "num_check_cases": 16,
+  "max_abs_diff_check": "1e-5"
+}

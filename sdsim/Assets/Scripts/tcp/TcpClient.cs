@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections;
+using System.Collections.Generic;
 using System;
 using System.Net;
 using System.Net.Sockets;
@@ -131,7 +132,9 @@ namespace tk
             // Update our drop detection...
             if(_clientSocket != null && !IsDropped())
             {
-                time_check_dropped += Time.deltaTime;
+                // 用不受 timeScale 影响的时钟:同步步进(timeScale=0)下基于 deltaTime 的
+                // 检测会冻结,断线客户端永远无法回收(其 OnDestroy 还负责恢复全局物理)。
+                time_check_dropped += Time.unscaledDeltaTime;
 
                 if(!_clientSocket.Connected)
                 {
@@ -143,10 +146,9 @@ namespace tk
 
                     try
                     {
-                        // this is the minimal form of message for a JsonTCPClient
-                        string msg = "{}\n";
-                        System.Text.Encoding encoding = System.Text.Encoding.Default;
-                        _clientSocket.Send(encoding.GetBytes(msg));
+                        // this is the minimal form of message for a JsonTCPClient;
+                        // 经统一发送队列,与遥测并发写同一 socket 不会字节交错。
+                        SendData(System.Text.Encoding.Default.GetBytes("{}\n"));
                     }
                     catch(SocketException e)
                     {
@@ -175,7 +177,12 @@ namespace tk
             
 
             if (recieved <= 0)
+            {
+                // 对端干净关闭(FIN):和异常路径一样只置标志,由主线程 Update 轮询回收,
+                // 不能静默 return——否则连接永久泄漏、断线回调永不触发。
+                dropped = true;
                 return;
+            }
 
             //Copy the recieved data into new buffer , to avoid null bytes
             byte[] recData = new byte[recieved];
@@ -199,12 +206,21 @@ namespace tk
 
         public bool SendData(byte[] data)
         {
+            if (data == null || data.Length == 0)
+                return false;
             if (!_clientSocket.Connected)
                 return false;
 
-            SocketAsyncEventArgs socketAsyncData = new SocketAsyncEventArgs();
-            socketAsyncData.SetBuffer(data, 0, data.Length);
-            _clientSocket.SendAsync(socketAsyncData);
+            // 统一走池化发送队列:同一 socket 上同步 Send 与线程池 BeginSend 并发
+            // 会在内核层字节交错(高负载下客户端收到撕裂 JSON)。队列保证同一时刻
+            // 只有一个未完成的发起。data 非池化缓冲,回收时 no-op,由 GC 释放。
+            lock (_pooledLock)
+            {
+                if (dropped)
+                    return false;
+                _pooledSendQueue.Enqueue(new KeyValuePair<byte[], int>(data, data.Length));
+                PumpPooledSendLocked();
+            }
 
             if (debug)
             {
@@ -212,6 +228,143 @@ namespace tk
             }
 
             return true;
+        }
+
+        // ---- 池化大报文发送(遥测专用,零分配) ----
+        // 遥测报文 ~200KB@60Hz,旧路径每帧新建 byte[] 产生 ~12MB/s GC 垃圾,
+        // 非增量 GC 全停主线程 → 窗口不定时卡顿闪动。这里维护固定大缓冲池:
+        // RentSendBuffer 租缓冲 → 调用方直接写包 → CommitPooledSend 排队。
+        // 发送串行化(任意时刻至多一个 BeginSend 在飞,其余 FIFO 排队,
+        // 保证 TCP 字节序与报文顺序);完成回调归还缓冲并抽下一个。
+        // 池耗尽时租用失败由调用方丢帧:遥测是实时数据,丢帧优于积压旧帧。
+        public int pooledSendDrops { get; private set; }
+
+        const int POOLED_BUF_COUNT = 8;
+        const int POOLED_BUF_SIZE = 1 << 20; // 1MB:640x480 JPEG base64 后 ~200KB,双相机也够
+        byte[][] _pooledBufs;
+        bool[] _pooledBusy;
+        bool _pooledSendInFlight;
+        readonly Queue<KeyValuePair<byte[], int>> _pooledSendQueue = new Queue<KeyValuePair<byte[], int>>();
+        readonly object _pooledLock = new object();
+
+        void EnsurePooledSendLocked()
+        {
+            if (_pooledBufs != null)
+                return;
+            _pooledBufs = new byte[POOLED_BUF_COUNT][];
+            _pooledBusy = new bool[POOLED_BUF_COUNT];
+            for (int i = 0; i < POOLED_BUF_COUNT; i++)
+                _pooledBufs[i] = new byte[POOLED_BUF_SIZE];
+        }
+
+        /// <summary>租一块发送缓冲;池耗尽返回 null(调用方应丢帧并计数)。</summary>
+        public byte[] RentSendBuffer()
+        {
+            lock (_pooledLock)
+            {
+                EnsurePooledSendLocked();
+                for (int i = 0; i < POOLED_BUF_COUNT; i++)
+                {
+                    if (!_pooledBusy[i])
+                    {
+                        _pooledBusy[i] = true;
+                        return _pooledBufs[i];
+                    }
+                }
+                pooledSendDrops++;
+                return null;
+            }
+        }
+
+        /// <summary>归还未提交发送的缓冲(拼包中途放弃时用)。</summary>
+        public void ReturnSendBuffer(byte[] buf)
+        {
+            if (buf == null)
+                return;
+            lock (_pooledLock) { ReturnPooledLocked(buf); }
+        }
+
+        void ReturnPooledLocked(byte[] buf)
+        {
+            for (int i = 0; i < POOLED_BUF_COUNT; i++)
+            {
+                if (ReferenceEquals(_pooledBufs[i], buf))
+                {
+                    _pooledBusy[i] = false;
+                    return;
+                }
+            }
+        }
+
+        /// <summary>提交已写好的缓冲发送;失败(未连接/已断开)归还缓冲并返回 false。</summary>
+        public bool CommitPooledSend(byte[] buf, int length)
+        {
+            if (buf == null || length <= 0)
+            {
+                ReturnSendBuffer(buf);
+                return false;
+            }
+            lock (_pooledLock)
+            {
+                if (dropped || !_clientSocket.Connected)
+                {
+                    ReturnPooledLocked(buf);
+                    pooledSendDrops++;
+                    return false;
+                }
+                _pooledSendQueue.Enqueue(new KeyValuePair<byte[], int>(buf, length));
+                PumpPooledSendLocked();
+            }
+            return true;
+        }
+
+        void PumpPooledSendLocked()
+        {
+            while (!_pooledSendInFlight && _pooledSendQueue.Count > 0)
+            {
+                if (dropped || !_clientSocket.Connected)
+                {
+                    while (_pooledSendQueue.Count > 0)
+                        ReturnPooledLocked(_pooledSendQueue.Dequeue().Key);
+                    return;
+                }
+                KeyValuePair<byte[], int> item = _pooledSendQueue.Dequeue();
+                _pooledSendInFlight = true;
+                try
+                {
+                    _clientSocket.BeginSend(item.Key, 0, item.Value, SocketFlags.None, PooledSendCallback, item);
+                }
+                catch (Exception)
+                {
+                    _pooledSendInFlight = false;
+                    ReturnPooledLocked(item.Key);
+                    dropped = true;
+                }
+            }
+        }
+
+        void PooledSendCallback(IAsyncResult ar)
+        {
+            KeyValuePair<byte[], int> item = (KeyValuePair<byte[], int>)ar.AsyncState;
+            byte[] buf = item.Key;
+            int total = 0;
+            try
+            {
+                total = _clientSocket.EndSend(ar);
+                // 高负载下 EndSend 可能只送达部分字节,必须补发剩余,否则客户端收到截断 JSON。
+                while (total < item.Value)
+                    total += _clientSocket.Send(buf, total, item.Value - total, SocketFlags.None);
+            }
+            catch (Exception)
+            {
+                dropped = true;
+            }
+            lock (_pooledLock)
+            {
+                _pooledSendInFlight = false;
+                ReturnPooledLocked(buf);
+                PumpPooledSendLocked();
+            }
         }
 
         public bool SendDataToPeers(byte[] data)

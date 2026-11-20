@@ -28,6 +28,17 @@ Then validate the steering control by sending images to your neural network and 
 
 You need to have [Unity](https://unity3d.com/get-unity/download) installed, and all python modules listed in the Requirements section below.
 
+The Unity project is `sdsim/`; see `ProjectSettings/ProjectVersion.txt` for the exact editor version (currently **2020.3.49f1** — install that exact version via Unity Hub to avoid project upgrades). Build the macOS player from the command line (after the first GUI open has imported assets once):
+
+```bash
+"/Applications/Unity/Hub/Editor/2020.3.49f1/Unity.app/Contents/MacOS/Unity" \
+  -batchmode -projectPath sdsim \
+  -executeMethod BuildCommand.Build \
+  -buildTargetStandaloneOSX build/donkey_sim.app -quit
+```
+
+Telemetry streaming rate is runtime-configurable per client: send `"fps": 60` in `cam_config` (default remains 20 for backward compatibility).
+
 Linix Unity install [here](https://forum.unity3d.com/threads/unity-on-linux-release-notes-and-known-issues.350256/). Check last post in this thread.
 
 You need python 3.4 or higher, 64 bit. You can create a virtual env if you like:
@@ -123,6 +134,22 @@ Let this run. It may take a few hours if running on CPU. Usually far less on a G
 ```bash
 python predict_client.py --model=../outputs/mymodel.h5
 ```
+
+
+
+## Reinforcement learning
+
+The simulator speaks a gym-style RL protocol (synchronous stepping, seeded random spawn on the track center-line, collision/flip/stuck termination signals, no-image state mode, `--rl` server flag). See `AGENTS.md` "RL 训练协议" for the message reference and `src/rl_smoke_test.py` for a runnable protocol check.
+
+Train with PPO (requires [gym-donkeycar](https://github.com/tawnkramer/gym-donkeycar) and stable-baselines3):
+
+```bash
+pip install -r requirements.txt          # gymnasium / stable-baselines3 / tensorboard
+pip install -e ../GymDonkeyCar           # 或你的 gym-donkeycar 路径
+python3 src/rl_train.py --envs 4 --steps 100000
+```
+
+Each worker launches its own headless sim instance on port 9101+rank (state-vector observations, ~120-250 steps/s aggregate). Use `--vision` for image observations with a CNN policy (sims run windowed). Models land in `outputs/`, tensorboard in `outputs/rl_tb/`.
 
 
 

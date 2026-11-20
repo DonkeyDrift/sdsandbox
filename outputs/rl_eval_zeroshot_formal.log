@@ -1,0 +1,10 @@
+mountain_track RL_EVAL_JSON {"episodes": 3, "avg_reward": 1757.6, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+generated_track RL_EVAL_JSON {"episodes": 3, "avg_reward": 1747.0, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+mini_monaco RL_EVAL_JSON {"episodes": 3, "avg_reward": 1768.8, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+warren RL_EVAL_JSON {"episodes": 3, "avg_reward": 1772.0, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+circuit_launch RL_EVAL_JSON {"episodes": 3, "avg_reward": 1755.1, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+sparkfun_avc RL_EVAL_JSON {"episodes": 3, "avg_reward": 1762.0, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+waveshare RL_EVAL_JSON {"episodes": 3, "avg_reward": 1742.9, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+generated_road RL_EVAL_JSON {"episodes": 3, "avg_reward": 1768.0, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+roboracingleague_1 RL_EVAL_JSON {"episodes": 3, "avg_reward": 1767.7, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}
+warehouse RL_EVAL_JSON {"episodes": 3, "avg_reward": 1742.4, "avg_steps": 1000.0, "crash_episodes": 0, "crash_rate": 0.0, "laps": 5, "max_steps": 1000, "seeds": [8300, 8301, 8302]}

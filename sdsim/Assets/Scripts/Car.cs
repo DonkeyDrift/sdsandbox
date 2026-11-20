@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 
 
@@ -42,10 +42,13 @@ public class Car : MonoBehaviour, ICar{
 
 	//name of the last object we hit.
 	public string last_collision = "none";
+	public float last_collision_impulse = 0f;
+
+	float stuckTimer = 0f;
 
 
 	// Use this for initialization
-	void Awake () 
+	void Awake ()
 	{
 		rb = GetComponent<Rigidbody>();
 
@@ -72,6 +75,22 @@ public class Car : MonoBehaviour, ICar{
 	public void RestorePosRot()
 	{
 		Set(startPos, startRot);
+	}
+
+	// 同步步进专用:不依赖 WaitForFixedUpdate(Physics.Simulate 不驱动它),
+	// 运动学沙盒内写 transform(运动学态以 transform 为准),再步进落定、释放回动力学。
+	public void SetImmediate(Vector3 pos, Quaternion rot, float dt, int settleSteps)
+	{
+		rb.isKinematic = true;
+		rb.position = pos;
+		rb.rotation = rot;
+		transform.position = pos;
+		transform.rotation = rot;
+		for (int i = 0; i < settleSteps; i++)
+			Physics.Simulate(dt);
+		rb.velocity = Vector3.zero;
+		rb.angularVelocity = Vector3.zero;
+		rb.isKinematic = false;
 	}
 
 	public void RequestThrottle(float val)
@@ -209,14 +228,30 @@ public class Car : MonoBehaviour, ICar{
 		lastAccel = requestTorque;
 		prevVel = velocity;
 		velocity = transform.InverseTransformDirection(rb.velocity);
-		acceleration = (velocity - prevVel)/Time.deltaTime;
+		acceleration = (velocity - prevVel)/Time.fixedDeltaTime; // FixedUpdate 内用 fixedDeltaTime:帧率波动时 deltaTime 让加速度遥测失真
 		gyro = rb.angularVelocity;
 		rotation = rb.rotation;
 
+		ApplyRequests();
+
+		if (Mathf.Abs(requestTorque) > 0.1f && rb.velocity.magnitude < 0.5f)
+			stuckTimer += Time.fixedDeltaTime;
+		else
+			stuckTimer = 0f;
+
+	}
+
+	// 把 requestTorque/requestSteering/requestBrake 写到 WheelCollider。
+	// FixedUpdate 每物理步调用;同步步进(timeScale=0,FixedUpdate 不跑)由
+	// TcpCarHandler 在 Physics.Simulate 前显式调用,否则轮上力矩停留在旧值。
+	public void ApplyRequests()
+	{
+		float velMag = transform.InverseTransformDirection(rb.velocity).magnitude;
+
 		// use the torque curve
-		float throttle = torqueCurve.Evaluate(velocity.magnitude / maxSpeed) * requestTorque * maxTorque;
+		float throttle = torqueCurve.Evaluate(velMag / maxSpeed) * requestTorque * maxTorque;
 		float steerAngle = requestSteering;
-        float brake = requestBrake * maxBreakTorque;
+		float brake = requestBrake * maxBreakTorque;
 
 		//front two tires.
 		wheelColliders[2].steerAngle = steerAngle;
@@ -228,7 +263,18 @@ public class Car : MonoBehaviour, ICar{
 			wc.motorTorque = throttle;
 			wc.brakeTorque = brake;
 		}
+	}
 
+	// 同步步进后刷新遥测依赖的运动学缓存(velocity/acceleration/gyro)。
+	// dt 为本次手动推进的总仿真时长;FixedUpdate 不跑时这些字段否则全部冻结。
+	public void SyncKinematics(float dt)
+	{
+		prevVel = velocity;
+		velocity = transform.InverseTransformDirection(rb.velocity);
+		if (dt > 0f)
+			acceleration = (velocity - prevVel) / dt;
+		gyro = rb.angularVelocity;
+		rotation = rb.rotation;
 	}
 
 	void FlipUpright()
@@ -266,8 +312,29 @@ public class Car : MonoBehaviour, ICar{
 		last_collision = "none";
 	}
 
+	public float LastCollisionImpulse
+	{
+		get { return last_collision_impulse; }
+	}
+
+	public void ClearLastCollisionImpulse()
+	{
+		last_collision_impulse = 0f;
+	}
+
+	public bool IsFlipped
+	{
+		get { return Vector3.Dot(transform.up, Vector3.up) < 0.2f; }
+	}
+
+	public float StuckTime
+	{
+		get { return stuckTimer; }
+	}
+
 	void OnCollisionEnter(Collision col)
 	{
 		last_collision = col.gameObject.name;
+		last_collision_impulse = col.impulse.magnitude;
 	}
 }

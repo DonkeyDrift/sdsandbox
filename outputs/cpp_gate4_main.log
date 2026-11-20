@@ -1,0 +1,12 @@
+[gate4] model=outputs/rl_export/cpp_delay10j.onnx ctl_step_ms=10 episodes=10 seed_base=8100 max_steps=2500
+[gate4] ep0 seed=8100 reward=1111.58 steps=936 mean_speed=2.10797 -> terminated(cte=2.50 hit=none flipped=0 stuck=0.00 lap=0 pos=(-7.54,0.70,8.92))
+[gate4] ep1 seed=8101 reward=628.934 steps=475 mean_speed=1.94766 -> terminated(cte=-2.51 hit=none flipped=0 stuck=0.00 lap=1 pos=(7.04,0.64,5.20))
+[gate4] ep2 seed=8102 reward=797.976 steps=646 mean_speed=2.02713 -> terminated(cte=-2.53 hit=none flipped=0 stuck=0.00 lap=0 pos=(-8.76,0.75,5.99))
+[gate4] ep3 seed=8103 reward=866.718 steps=712 mean_speed=1.97544 -> terminated(cte=-2.50 hit=none flipped=0 stuck=0.00 lap=1 pos=(5.95,1.03,-1.80))
+[gate4] ep4 seed=8104 reward=3219.4 steps=2500 mean_speed=2.14362 -> max_steps
+[gate4] ep5 seed=8105 reward=574.482 steps=582 mean_speed=1.89536 -> terminated(cte=-2.52 hit=none flipped=0 stuck=0.00 lap=1 pos=(6.19,1.01,-1.67))
+[gate4] ep6 seed=8106 reward=3923.17 steps=2155 mean_speed=2.23527 -> terminated(cte=-2.60 hit=none flipped=0 stuck=0.00 lap=1 pos=(-0.39,0.52,0.61))
+[gate4] ep7 seed=8107 reward=805.092 steps=663 mean_speed=2.00963 -> terminated(cte=-2.55 hit=none flipped=0 stuck=0.00 lap=0 pos=(-0.41,0.52,0.88))
+[gate4] ep8 seed=8108 reward=2720.09 steps=1573 mean_speed=2.20002 -> terminated(cte=2.50 hit=none flipped=0 stuck=0.00 lap=1 pos=(6.45,0.69,1.86))
+[gate4] ep9 seed=8109 reward=940.434 steps=675 mean_speed=2.1329 -> terminated(cte=2.50 hit=none flipped=0 stuck=0.00 lap=0 pos=(2.00,0.65,4.19))
+[gate4] valid 10/10 avg_reward=1558.79 avg_steps=1091.7 mean_speed=2.0675 crashes=9 laps=0

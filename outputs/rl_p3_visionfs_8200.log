@@ -1,0 +1,31 @@
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9091 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+[rl_eval] 连接 127.0.0.1:9091 sync=False state_obs=False level=mountain_track
+starting DonkeyGym env
+Setting default: frame_skip 1
+Setting default: log_level 20
+Setting default: steer_limit 1.0
+Setting default: throttle_min 0.0
+Setting default: throttle_max 1.0
+Setting default: done_on_flip True
+Setting default: done_on_stuck True
+Setting default: stuck_time_thresh 2.5
+[rl_eval] 视觉叠帧 x4(合并通道)
+[rl_eval] ep0 (seed=8200): reward=154.5 steps=119 -> terminated(cte=-2.53 hit=none flipped=False stuck=0.0 lap=0 pos=(0.246176838874817, 0.445917010307312, 13.1598062515259))
+[rl_eval] ep1 (seed=8201): reward=139.9 steps=98 -> terminated(cte=2.80 hit=none flipped=False stuck=0.0 lap=0 pos=(2.43164253234863, 0.678776383399963, 4.99712800979614))
+[rl_eval] ep2 (seed=8202): reward=82.8 steps=95 -> terminated(cte=-2.60 hit=none flipped=False stuck=0.0 lap=0 pos=(-1.95096933841705, 0.608741343021393, 13.7389478683472))
+[rl_eval] ep3 (seed=8203): reward=102.9 steps=78 -> terminated(cte=2.60 hit=none flipped=False stuck=0.0 lap=0 pos=(2.32055115699768, 0.666266322135925, 4.76584243774414))
+[rl_eval] ep4 (seed=8204): reward=71.6 steps=86 -> terminated(cte=-2.51 hit=none flipped=False stuck=0.0 lap=0 pos=(-0.405969649553299, 0.458534836769104, 13.2813177108765))
+[rl_eval] ep5 (seed=8205): reward=70.4 steps=73 -> terminated(cte=2.73 hit=none flipped=False stuck=0.0 lap=0 pos=(2.36496543884277, 0.671736896038055, 4.83420896530151))
+[rl_eval] ep6 (seed=8206): reward=43.6 steps=49 -> terminated(cte=-2.58 hit=none flipped=False stuck=0.0 lap=0 pos=(-0.647667646408081, 0.474432289600372, 13.3542966842651))
+[rl_eval] ep7 (seed=8207): reward=79.9 steps=67 -> terminated(cte=2.89 hit=none flipped=False stuck=0.0 lap=0 pos=(1.34699559211731, 0.756682574748993, 8.25998687744141))
+[rl_eval] ep8 (seed=8208): reward=99.8 steps=95 -> terminated(cte=-2.73 hit=none flipped=False stuck=0.0 lap=0 pos=(6.70702266693115, 0.969256997108459, 11.9343481063843))
+[rl_eval] ep9 (seed=8209): reward=30.5 steps=51 -> terminated(cte=2.62 hit=none flipped=False stuck=0.0 lap=0 pos=(0.591687500476837, 0.778199255466461, 8.45944499969482))
+[rl_eval] 平均 reward=87.6 平均步数=81 (1 步=0.05s 仿真)
+RL_EVAL_JSON {"episodes": 10, "avg_reward": 87.6, "avg_steps": 81.1, "crash_episodes": 10, "crash_rate": 1.0, "laps": 0, "max_steps": 2500, "seeds": [8200, 8201, 8202, 8203, 8204, 8205, 8206, 8207, 8208, 8209]}

@@ -1,5 +1,6 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using Unity.Collections;
 using UnityEngine;
 
@@ -10,9 +11,49 @@ public class CameraSensor : MonoBehaviour {
 	public int height = 256;
 	public int depth = 3;
 	public string img_enc = "JPG"; //accepts JPG, PNG, TGA
+	public bool captureEnabled = true; //cam_config img_enc="none" 时置 false:零渲染零回读零编码,遥测只发状态量
 	Texture2D tex;
 	RenderTexture ren;
 	Rect ImageRect;
+
+	// ---- 异步采集管线(AsyncGPUReadback + 工作线程 JPEG) ----
+	// 动机:旧实现每发送一帧在主线程做 sensorCam.Render()(冗余,相机设了
+	// targetTexture 本来就每帧自动渲一次)+ ReadPixels(GPU 同步停顿)+
+	// EncodeToJPG(主线程编码),合计 ~6-12ms,与渲染/物理互相挤压,把遥测
+	// ceiling 压到 ~58Hz。新实现:Update 里向 RT 发异步回读请求(本帧渲染
+	// 完成后由 GPU 直接拷出,无停顿)→ 主线程只做 RGBA→RGB 拷包 → JPEG 编码
+	// 挪到工作线程(stb) → GetImageBytes 永远立即返回最近一帧。
+	// 回退:首帧/请求出错/库缺失时走旧同步路径(ReadPixels+EncodeToJPG)。
+	const int JPG_QUALITY = 75; // 与 Unity EncodeToJPG 默认一致,保持码率可比
+
+	byte[] lastJpg;
+	int lastJpgLen;         // lastJpg 的有效长度(缓冲容量可能大于内容)
+	byte[] jpgBack;         // 编码线程写入缓冲;完成后与 lastJpg 交换(双缓冲,零分配)
+	readonly object jpgLock = new object();
+	// 2022.3 中该 API 位于 UnityEngine.Rendering 命名空间(根命名空间无别名)
+	UnityEngine.Rendering.AsyncGPUReadbackRequest pendingReq;
+	bool hasPending;
+	float pendingKickTime;    // 发起回读的实时时钟,超时兜底用
+	public float readbackTimeoutSec = 3.0f; // 挂多久算卡死:离屏/遮挡下 GPU 回读可能永不完成
+	bool readbackBroken;      // 请求出错/超时后永久回退同步路径(只报一次)
+	bool fallbackLogged;
+	Thread encodeThread;
+	readonly ManualResetEventSlim encodeWake = new ManualResetEventSlim(false);
+	readonly Queue<(byte[] rgb, int kick)> jobs = new Queue<(byte[] rgb, int kick)>();
+	readonly object jobsLock = new object();
+	readonly Queue<byte[]> bufferPool = new Queue<byte[]>();
+	volatile bool running = true;
+
+	// 回读帧计数:KickReadback 发起时 +1;该帧 RGB 拷包且编码交换完成后
+	// LastCompletedFrame 追到对应序号。同步步进按 KickCount>=目标 判断
+	// 「本次步进的图已可发」,编码在工作线程,序号随任务队列传递。
+	int kickCount;
+	int pendingKickSeq;
+	public int KickCount { get { return kickCount; } }
+	public volatile int LastCompletedFrame;
+
+	/// <summary>最近一次采包耗时(ms,主线程段),TelemetryStats 用。</summary>
+	public float LastCaptureMs { get; private set; }
 
 	public void SetConfig(float fov, float offset_x, float offset_y, float offset_z, float rot_x, float rot_y, float rot_z, int img_w, int img_h, int img_d, string _img_enc)
 	{
@@ -25,12 +66,14 @@ public class CameraSensor : MonoBehaviour {
 		{
 			width = img_w;
 			height = img_h;
-			
+
 			Awake();
 		}
 
 		if(_img_enc.Length == 3)
 			img_enc = _img_enc;
+
+		captureEnabled = _img_enc != "none";
 
 		if(offset_x != 0.0f || offset_y != 0.0f || offset_z != 0.0f)
 			transform.localPosition = new Vector3(offset_x, offset_y, offset_z);
@@ -51,7 +94,217 @@ public class CameraSensor : MonoBehaviour {
 		sensorCam.targetTexture = ren;
 	}
 
-	Texture2D RTImage() 
+	void OnDestroy()
+	{
+		running = false;
+		encodeWake.Set();
+	}
+
+	/// <summary>主线程每帧调用(TcpCarHandler.Update):轮询回读结果、喂编码线程。</summary>
+	public void Tick()
+	{
+		if (!captureEnabled)
+			return;
+
+		float t0 = Time.realtimeSinceStartup * 1000f;
+
+		if (hasPending && !pendingReq.done
+			&& Time.realtimeSinceStartup - pendingKickTime > readbackTimeoutSec)
+		{
+			// 超时兜底:离屏渲染/窗口遮挡下回读请求可能永不完成(挂起 N 秒),
+			// 同步步进会永久卡在等帧、异步推流停摆。丢弃请求并永久回退
+			// 同步 ReadPixels 路径(功能存活、每帧多 6-12ms 主线程开销),loud 记录。
+			hasPending = false;
+			pendingReq = default;
+			readbackBroken = true;
+			LastCompletedFrame = pendingKickSeq; // 放行同步步进的等帧门
+			Debug.LogWarning("[CameraSensor] AsyncGPUReadback 超时(>" + readbackTimeoutSec
+				+ "s,疑离屏/遮挡挂起),永久回退同步 ReadPixels 路径。");
+		}
+
+		if (hasPending && pendingReq.done)
+		{
+			hasPending = false;
+			if (pendingReq.hasError)
+			{
+				readbackBroken = true;
+				LastCompletedFrame = pendingKickSeq;
+				pendingReq = default;
+				if (!fallbackLogged)
+				{
+					fallbackLogged = true;
+					Debug.LogWarning("[CameraSensor] AsyncGPUReadback 出错,回退同步 ReadPixels 路径。");
+				}
+			}
+			else
+			{
+				// 请求完成后 NativeArray 即失效,立刻拷成 RGB24 再放手。
+				// readback 原始数据是 bottom-up(UV 原点在左下),ReadPixels 是
+				// top-down——逐行翻转,否则画面上下颠倒。
+				NativeArray<byte> rgba = pendingReq.GetData<byte>();
+				byte[] rgb = RentBuffer();
+				bool gray = (depth == 1);
+				for (int y = 0; y < height; y++)
+				{
+					int srcRow = (height - 1 - y) * width;
+					int dstRow = y * width;
+					for (int x = 0; x < width; x++)
+					{
+						int s = (srcRow + x) * 4, d = (dstRow + x) * 3;
+						byte r = rgba[s], g = rgba[s + 1], b = rgba[s + 2];
+						if (gray)
+						{
+							byte lum = (byte)(0.2126f * r + 0.7152f * g + 0.0722f * b);
+							r = g = b = lum;
+						}
+						rgb[d] = r; rgb[d + 1] = g; rgb[d + 2] = b;
+					}
+				}
+				int doneKick = pendingKickSeq;
+				pendingReq = default;
+
+				byte[] jpg = null;
+				if (!StbJpeg.Available)
+					jpg = EncodeOnMainThread(rgb); // 无原生库:主线程编码(仍无 GPU 停顿)
+				else
+				{
+					lock (jobsLock) { jobs.Enqueue((rgb, doneKick)); }
+					encodeWake.Set();
+					EnsureEncodeThread();
+				}
+				if (jpg != null)
+					lock (jpgLock) { lastJpg = jpg; lastJpgLen = jpg.Length; LastCompletedFrame = doneKick; }
+				// 主线程编码路径的 buffer 在 EncodeOnMainThread 内归还
+			}
+		}
+
+		LastCaptureMs = Time.realtimeSinceStartup * 1000f - t0;
+	}
+
+	/// <summary>发送节流触发:先手动 Render 填 RT,再发异步回读请求。
+	/// 注意:传感器相机在 prefab 中是 component-disabled(靠手动 Render 出图,
+	/// 不参与每帧自动渲染)——此前误判"冗余 Render"实为唯一出图路径,去掉会全黑。</summary>
+	void KickReadback()
+	{
+		KickReadbackInternal(false);
+	}
+
+	/// <summary>同步步进用:丢弃未完成的旧回读,立即重渲并发起新请求,
+	/// 保证完成的帧严格对应调用时刻的场景状态。</summary>
+	public void KickReadbackNow()
+	{
+		KickReadbackInternal(true);
+	}
+
+	void KickReadbackInternal(bool force)
+	{
+		if (!captureEnabled || readbackBroken || ren == null)
+			return;
+		if (hasPending)
+		{
+			if (!force)
+				return;
+			pendingReq = default;
+			hasPending = false;
+		}
+		try
+		{
+			sensorCam.Render();
+			pendingReq = UnityEngine.Rendering.AsyncGPUReadback.Request(ren);
+			hasPending = true;
+			pendingKickTime = Time.realtimeSinceStartup;
+			pendingKickSeq = ++kickCount;
+		}
+		catch (System.Exception)
+		{
+			readbackBroken = true;
+		}
+	}
+
+	void EnsureEncodeThread()
+	{
+		if (encodeThread != null)
+			return;
+		encodeThread = new Thread(EncodeLoop)
+		{
+			IsBackground = true,
+			Name = "CameraSensorJpeg",
+		};
+		encodeThread.Start();
+	}
+
+	void EncodeLoop()
+	{
+		while (running)
+		{
+			encodeWake.Wait();
+			while (true)
+			{
+				byte[] rgb = null;
+				int rgbKick = 0;
+				lock (jobsLock)
+				{
+					if (jobs.Count == 0) break;
+					(rgb, rgbKick) = jobs.Dequeue();
+				}
+				// 双缓冲:编码写 jpgBack,完成后与已发布的 lastJpg 交换,
+				// 全程无每帧 byte[] 分配(dst 不足时 EncodeInto 才扩容,随内容收敛)。
+				int len = StbJpeg.EncodeInto(rgb, width, height, JPG_QUALITY, ref jpgBack);
+				if (len > 0)
+					lock (jpgLock)
+					{
+						byte[] t = lastJpg; lastJpg = jpgBack; jpgBack = t;
+						lastJpgLen = len;
+						LastCompletedFrame = rgbKick;
+					}
+				ReturnBuffer(rgb);
+			}
+		}
+	}
+
+	byte[] EncodeOnMainThread(byte[] rgb)
+	{
+		try
+		{
+			tex.LoadRawTextureData(rgb);
+			tex.Apply();
+			return tex.EncodeToJPG(JPG_QUALITY);
+		}
+		finally
+		{
+			ReturnBuffer(rgb);
+		}
+	}
+
+	byte[] RentBuffer()
+	{
+		int need = width * height * 3;
+		lock (bufferPool)
+		{
+			if (bufferPool.Count > 0)
+			{
+				byte[] b = bufferPool.Dequeue();
+				if (b.Length == need)
+					return b;
+			}
+		}
+		return new byte[need];
+	}
+
+	void ReturnBuffer(byte[] b)
+	{
+		if (b == null)
+			return;
+		lock (bufferPool)
+		{
+			if (bufferPool.Count < 4)
+				bufferPool.Enqueue(b);
+		}
+	}
+
+	// ---------- 旧同步路径(Logger.cs 截图/首帧/回退用) ----------
+
+	Texture2D RTImage()
 	{
 		var currentRT = RenderTexture.active;
 		RenderTexture.active = sensorCam.targetTexture;
@@ -89,7 +342,31 @@ public class CameraSensor : MonoBehaviour {
 
 		if(img_enc == "TGA")
 			return GetImage().EncodeToTGA();
-			
+
+		// 新管线:kick 一次请求,返回最近已编码帧(首帧尚未就绪时回退同步路径)
+		KickReadback();
+		lock (jpgLock)
+		{
+			if (lastJpg != null)
+				return lastJpg;
+		}
 		return GetImage().EncodeToJPG();
+	}
+
+	/// <summary>把最近一帧 JPEG 直接 base64 进调用方字符缓冲(遥测零分配路径,
+	/// TcpCarHandler.SendTelemetry 用)。返回写入的字符数。
+	/// outChars 容量须 >= 4*ceil(jpgLen/3);base64 转换在 jpgLock 内完成,
+	/// 防止编码线程中途交换缓冲(拷贝 ~100µs,编码线程可承受)。</summary>
+	public int GetLatestJpgBase64(char[] outChars)
+	{
+		KickReadback();
+		lock (jpgLock)
+		{
+			if (lastJpg != null)
+				return System.Convert.ToBase64CharArray(lastJpg, 0, lastJpgLen, outChars, 0);
+		}
+		// 首帧未就绪:同步回退(一次性,走旧分配路径)
+		byte[] jpg = GetImage().EncodeToJPG(JPG_QUALITY);
+		return System.Convert.ToBase64CharArray(jpg, 0, jpg.Length, outChars, 0);
 	}
 }

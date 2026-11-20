@@ -195,7 +195,7 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
                         copy_zip_entry(source, info, destination)
 
                 hook_info = zipfile.ZipInfo(
-                    renamed_entry(f"{data_prefix}Managed/{HOOK_NAME}"),
+                    f"{renamed_entry(data_prefix)}Managed/{HOOK_NAME}",
                     assembly_info.date_time,
                 )
                 hook_info.compress_type = zipfile.ZIP_DEFLATED
@@ -211,7 +211,7 @@ def patch_zip(source_path, output_path, hook_source, patcher_source, mono_root):
                 expected = {
                     renamed_entry(assembly_info.filename),
                     renamed_entry(manifest_info.filename),
-                    renamed_entry(f"{data_prefix}Managed/{HOOK_NAME}"),
+                    f"{renamed_entry(data_prefix)}Managed/{HOOK_NAME}",
                 }
                 if not expected.issubset(names):
                     raise RuntimeError("output zip is missing patched entries")

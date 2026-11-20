@@ -1,0 +1,27 @@
+[gate4] model=outputs/rl_export/cpp_delay20j3.onnx ctl_step_ms=20 episodes=25 seed_base=8200 max_steps=2500
+[gate4] ep0 seed=8200 reward=4186.8 steps=2500 mean_speed=1.91536 -> max_steps
+[gate4] ep1 seed=8201 reward=206.068 steps=162 mean_speed=1.85637 -> terminated(cte=-2.61 hit=none flipped=0 stuck=0.00 lap=0 pos=(-0.42,0.52,0.98))
+[gate4] ep2 seed=8202 reward=4189.18 steps=2500 mean_speed=1.91787 -> max_steps
+[gate4] ep3 seed=8203 reward=3002.21 steps=1866 mean_speed=1.92274 -> terminated(cte=2.52 hit=none flipped=0 stuck=0.00 lap=1 pos=(1.19,0.63,3.22))
+[gate4] ep4 seed=8204 reward=1535.26 steps=956 mean_speed=1.94925 -> terminated(cte=-2.51 hit=none flipped=0 stuck=0.00 lap=1 pos=(0.06,0.58,2.82))
+[gate4] ep5 seed=8205 reward=2791.1 steps=1712 mean_speed=1.90288 -> terminated(cte=-2.55 hit=none flipped=0 stuck=0.00 lap=1 pos=(-0.38,0.52,0.59))
+[gate4] ep6 seed=8206 reward=1427.7 steps=933 mean_speed=1.93706 -> terminated(cte=2.63 hit=none flipped=0 stuck=0.00 lap=1 pos=(1.40,0.64,3.42))
+[gate4] ep7 seed=8207 reward=20.7614 steps=49 mean_speed=0.917773 PARKED -> terminated(cte=2.53 hit=none flipped=0 stuck=0.00 lap=0 pos=(1.82,0.64,3.93))
+[gate4] ep8 seed=8208 reward=4078.25 steps=2500 mean_speed=1.93019 -> max_steps
+[gate4] ep9 seed=8209 reward=2596.37 steps=1623 mean_speed=1.90373 -> terminated(cte=-2.50 hit=none flipped=0 stuck=0.00 lap=1 pos=(-0.01,0.58,2.72))
+[gate4] ep10 seed=8210 reward=1160.99 steps=770 mean_speed=1.88984 -> terminated(cte=-2.51 hit=none flipped=0 stuck=0.00 lap=1 pos=(0.04,0.58,2.79))
+[gate4] ep11 seed=8211 reward=20.065 steps=48 mean_speed=0.826579 PARKED -> terminated(cte=2.53 hit=none flipped=0 stuck=0.00 lap=0 pos=(0.10,0.76,8.39))
+[gate4] ep12 seed=8212 reward=980.02 steps=643 mean_speed=1.86415 -> terminated(cte=-2.56 hit=none flipped=0 stuck=0.00 lap=1 pos=(-0.38,0.52,0.58))
+[gate4] ep13 seed=8213 reward=2342.09 steps=1408 mean_speed=1.91137 -> terminated(cte=-2.62 hit=none flipped=0 stuck=0.00 lap=1 pos=(-0.40,0.52,0.68))
+[gate4] ep14 seed=8214 reward=3479.49 steps=2276 mean_speed=1.93259 -> terminated(cte=-2.52 hit=none flipped=0 stuck=0.00 lap=2 pos=(-0.37,0.52,0.57))
+[gate4] ep15 seed=8215 reward=4129.04 steps=2500 mean_speed=1.91044 -> max_steps
+[gate4] ep16 seed=8216 reward=4141.84 steps=2500 mean_speed=1.92487 -> max_steps
+[gate4] ep17 seed=8217 reward=2083.41 steps=1243 mean_speed=1.92534 -> terminated(cte=-2.55 hit=none flipped=0 stuck=0.00 lap=1 pos=(-0.39,0.52,0.64))
+[gate4] ep18 seed=8218 reward=566.968 steps=405 mean_speed=1.90824 -> terminated(cte=-2.52 hit=none flipped=0 stuck=0.00 lap=0 pos=(0.16,0.59,2.97))
+[gate4] ep19 seed=8219 reward=2015.81 steps=1274 mean_speed=1.92644 -> terminated(cte=2.50 hit=none flipped=0 stuck=0.00 lap=1 pos=(1.43,0.64,3.48))
+[gate4] ep20 seed=8220 reward=3112.51 steps=1980 mean_speed=1.92895 -> terminated(cte=-2.52 hit=none flipped=0 stuck=0.00 lap=1 pos=(-0.38,0.52,0.60))
+[gate4] ep21 seed=8221 reward=1973.58 steps=1246 mean_speed=1.92477 -> terminated(cte=2.52 hit=none flipped=0 stuck=0.00 lap=1 pos=(2.38,0.67,4.93))
+[gate4] ep22 seed=8222 reward=4043.68 steps=2500 mean_speed=1.91959 -> max_steps
+[gate4] ep23 seed=8223 reward=1732.08 steps=1090 mean_speed=1.92375 -> terminated(cte=-2.57 hit=none flipped=0 stuck=0.00 lap=1 pos=(-0.01,0.58,2.73))
+[gate4] ep24 seed=8224 reward=3039.66 steps=1987 mean_speed=1.91832 -> terminated(cte=2.52 hit=none flipped=0 stuck=0.00 lap=1 pos=(2.31,0.67,4.77))
+[gate4] valid 23/25 avg_reward=2557.14 avg_steps=1590.17 mean_speed=1.91496 crashes=17 laps=0

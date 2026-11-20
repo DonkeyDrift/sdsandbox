@@ -1,0 +1,480 @@
+[rl_train] 1 个训练 worker + 0 个评测 worker,sim 端口分配:
+  port 9201 -> train[0]
+[rl_train] algo=ppo sync_mode=False state_obs=False img_enc=JPG spawn={'node_min': 5, 'node_max': 245, 'lateral_offset': 1.0, 'heading_noise': 8.0} resume=None seed=1
+[UnityMemory] Configuration Parameters - Can be set up in boot.config
+    "memorysetup-bucket-allocator-granularity=16"
+    "memorysetup-bucket-allocator-bucket-count=8"
+    "memorysetup-bucket-allocator-block-size=4194304"
+    "memorysetup-bucket-allocator-block-count=1"
+    "memorysetup-main-allocator-block-size=16777216"
+    "memorysetup-thread-allocator-block-size=16777216"
+    "memorysetup-gfx-main-allocator-block-size=16777216"
+    "memorysetup-gfx-thread-allocator-block-size=16777216"
+    "memorysetup-cache-allocator-block-size=4194304"
+    "memorysetup-typetree-allocator-block-size=2097152"
+    "memorysetup-profiler-bucket-allocator-granularity=16"
+    "memorysetup-profiler-bucket-allocator-bucket-count=8"
+    "memorysetup-profiler-bucket-allocator-block-size=4194304"
+    "memorysetup-profiler-bucket-allocator-block-count=1"
+    "memorysetup-profiler-allocator-block-size=16777216"
+    "memorysetup-profiler-editor-allocator-block-size=1048576"
+    "memorysetup-temp-allocator-size-main=4194304"
+    "memorysetup-job-temp-allocator-block-size=2097152"
+    "memorysetup-job-temp-allocator-block-size-background=1048576"
+    "memorysetup-job-temp-allocator-reduction-small-platforms=262144"
+    "memorysetup-allocator-temp-initial-block-size-main=262144"
+    "memorysetup-allocator-temp-initial-block-size-worker=262144"
+    "memorysetup-temp-allocator-size-background-worker=32768"
+    "memorysetup-temp-allocator-size-job-worker=262144"
+    "memorysetup-temp-allocator-size-preload-manager=262144"
+    "memorysetup-temp-allocator-size-nav-mesh-worker=65536"
+    "memorysetup-temp-allocator-size-audio-worker=65536"
+    "memorysetup-temp-allocator-size-cloud-worker=32768"
+    "memorysetup-temp-allocator-size-gfx=262144"
+INFO:gym_donkeycar.core.client:connecting to 127.0.0.1:9201 
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/hwp/Library/Python/3.9/lib/python/site-packages/gymnasium/spaces/box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+INFO:gym_donkeycar.envs.donkey_sim:on need car config
+INFO:gym_donkeycar.envs.donkey_sim:sending car config.
+INFO:gym_donkeycar.envs.donkey_sim:sim started!
+INFO:gym_donkeycar.envs.donkey_sim:done sending cam config. {'img_enc': 'JPG', 'img_w': 320, 'img_h': 240}
+Using cpu device
+Wrapping the env in a VecTransposeImage.
+Logging to outputs/rl_tb/visionhr_1
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 81.7     |
+|    ep_rew_mean     | -80.5    |
+| time/              |          |
+|    fps             | 15       |
+|    iterations      | 1        |
+|    time_elapsed    | 33       |
+|    total_timesteps | 512      |
+---------------------------------
+------------------------------------------
+| rollout/                |              |
+|    ep_len_mean          | 99.9         |
+|    ep_rew_mean          | -74.3        |
+| time/                   |              |
+|    fps                  | 11           |
+|    iterations           | 2            |
+|    time_elapsed         | 91           |
+|    total_timesteps      | 1024         |
+| train/                  |              |
+|    approx_kl            | 0.0052022366 |
+|    clip_fraction        | 0.0727       |
+|    clip_range           | 0.2          |
+|    entropy_loss         | -2.84        |
+|    explained_variance   | 0.000859     |
+|    learning_rate        | 0.0001       |
+|    loss                 | 208          |
+|    n_updates            | 10           |
+|    policy_gradient_loss | -0.00676     |
+|    std                  | 1            |
+|    value_loss           | 618          |
+------------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 81.8        |
+|    ep_rew_mean          | -77.8       |
+| time/                   |             |
+|    fps                  | 9           |
+|    iterations           | 3           |
+|    time_elapsed         | 154         |
+|    total_timesteps      | 1536        |
+| train/                  |             |
+|    approx_kl            | 0.008685162 |
+|    clip_fraction        | 0.0619      |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.84       |
+|    explained_variance   | 0.0303      |
+|    learning_rate        | 0.0001      |
+|    loss                 | 63.4        |
+|    n_updates            | 20          |
+|    policy_gradient_loss | -0.00024    |
+|    std                  | 1           |
+|    value_loss           | 210         |
+-----------------------------------------
+------------------------------------------
+| rollout/                |              |
+|    ep_len_mean          | 79.2         |
+|    ep_rew_mean          | -78.7        |
+| time/                   |              |
+|    fps                  | 9            |
+|    iterations           | 4            |
+|    time_elapsed         | 209          |
+|    total_timesteps      | 2048         |
+| train/                  |              |
+|    approx_kl            | 0.0064852326 |
+|    clip_fraction        | 0.0348       |
+|    clip_range           | 0.2          |
+|    entropy_loss         | -2.84        |
+|    explained_variance   | 0.245        |
+|    learning_rate        | 0.0001       |
+|    loss                 | 88.7         |
+|    n_updates            | 30           |
+|    policy_gradient_loss | -0.00369     |
+|    std                  | 1            |
+|    value_loss           | 362          |
+------------------------------------------
+------------------------------------------
+| rollout/                |              |
+|    ep_len_mean          | 93.4         |
+|    ep_rew_mean          | -79.6        |
+| time/                   |              |
+|    fps                  | 9            |
+|    iterations           | 5            |
+|    time_elapsed         | 271          |
+|    total_timesteps      | 2560         |
+| train/                  |              |
+|    approx_kl            | 0.0076390374 |
+|    clip_fraction        | 0.098        |
+|    clip_range           | 0.2          |
+|    entropy_loss         | -2.84        |
+|    explained_variance   | 0.555        |
+|    learning_rate        | 0.0001       |
+|    loss                 | 5.62         |
+|    n_updates            | 40           |
+|    policy_gradient_loss | -0.00607     |
+|    std                  | 1            |
+|    value_loss           | 49.5         |
+------------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 98.6        |
+|    ep_rew_mean          | -79.7       |
+| time/                   |             |
+|    fps                  | 9           |
+|    iterations           | 6           |
+|    time_elapsed         | 327         |
+|    total_timesteps      | 3072        |
+| train/                  |             |
+|    approx_kl            | 0.014514995 |
+|    clip_fraction        | 0.208       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.84       |
+|    explained_variance   | -0.112      |
+|    learning_rate        | 0.0001      |
+|    loss                 | 41.6        |
+|    n_updates            | 50          |
+|    policy_gradient_loss | 0.00197     |
+|    std                  | 1           |
+|    value_loss           | 199         |
+-----------------------------------------
+----------------------------------------
+| rollout/                |            |
+|    ep_len_mean          | 99         |
+|    ep_rew_mean          | -82.1      |
+| time/                   |            |
+|    fps                  | 9          |
+|    iterations           | 7          |
+|    time_elapsed         | 386        |
+|    total_timesteps      | 3584       |
+| train/                  |            |
+|    approx_kl            | 0.03965378 |
+|    clip_fraction        | 0.233      |
+|    clip_range           | 0.2        |
+|    entropy_loss         | -2.84      |
+|    explained_variance   | -0.0597    |
+|    learning_rate        | 0.0001     |
+|    loss                 | 23.6       |
+|    n_updates            | 60         |
+|    policy_gradient_loss | 0.011      |
+|    std                  | 1          |
+|    value_loss           | 89.3       |
+----------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 97.6        |
+|    ep_rew_mean          | -82         |
+| time/                   |             |
+|    fps                  | 9           |
+|    iterations           | 8           |
+|    time_elapsed         | 444         |
+|    total_timesteps      | 4096        |
+| train/                  |             |
+|    approx_kl            | 0.016130723 |
+|    clip_fraction        | 0.158       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.85       |
+|    explained_variance   | 0.416       |
+|    learning_rate        | 0.0001      |
+|    loss                 | 27.5        |
+|    n_updates            | 70          |
+|    policy_gradient_loss | -0.00832    |
+|    std                  | 1           |
+|    value_loss           | 72.6        |
+-----------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 104         |
+|    ep_rew_mean          | -83         |
+| time/                   |             |
+|    fps                  | 9           |
+|    iterations           | 9           |
+|    time_elapsed         | 503         |
+|    total_timesteps      | 4608        |
+| train/                  |             |
+|    approx_kl            | 0.004046283 |
+|    clip_fraction        | 0.123       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.85       |
+|    explained_variance   | 0.414       |
+|    learning_rate        | 0.0001      |
+|    loss                 | 30.6        |
+|    n_updates            | 80          |
+|    policy_gradient_loss | 0.00175     |
+|    std                  | 1           |
+|    value_loss           | 79.6        |
+-----------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 109         |
+|    ep_rew_mean          | -83.7       |
+| time/                   |             |
+|    fps                  | 9           |
+|    iterations           | 10          |
+|    time_elapsed         | 559         |
+|    total_timesteps      | 5120        |
+| train/                  |             |
+|    approx_kl            | 0.022070516 |
+|    clip_fraction        | 0.198       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.85       |
+|    explained_variance   | 0.379       |
+|    learning_rate        | 0.0001      |
+|    loss                 | 14.5        |
+|    n_updates            | 90          |
+|    policy_gradient_loss | 0.000519    |
+|    std                  | 1           |
+|    value_loss           | 93.6        |
+-----------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 103         |
+|    ep_rew_mean          | -83.3       |
+| time/                   |             |
+|    fps                  | 9           |
+|    iterations           | 11          |
+|    time_elapsed         | 619         |
+|    total_timesteps      | 5632        |
+| train/                  |             |
+|    approx_kl            | 0.027016591 |
+|    clip_fraction        | 0.128       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.85       |
+|    explained_variance   | -0.00222    |
+|    learning_rate        | 0.0001      |
+|    loss                 | 14.2        |
+|    n_updates            | 100         |
+|    policy_gradient_loss | 0.00839     |
+|    std                  | 1           |
+|    value_loss           | 67.6        |
+-----------------------------------------
+------------------------------------------
+| rollout/                |              |
+|    ep_len_mean          | 95.6         |
+|    ep_rew_mean          | -83.5        |
+| time/                   |              |
+|    fps                  | 8            |
+|    iterations           | 12           |
+|    time_elapsed         | 685          |
+|    total_timesteps      | 6144         |
+| train/                  |              |
+|    approx_kl            | 0.0066461824 |
+|    clip_fraction        | 0.0861       |
+|    clip_range           | 0.2          |
+|    entropy_loss         | -2.85        |
+|    explained_variance   | 0.692        |
+|    learning_rate        | 0.0001       |
+|    loss                 | 18.3         |
+|    n_updates            | 110          |
+|    policy_gradient_loss | -0.000778    |
+|    std                  | 1            |
+|    value_loss           | 54.5         |
+------------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 91          |
+|    ep_rew_mean          | -84.1       |
+| time/                   |             |
+|    fps                  | 8           |
+|    iterations           | 13          |
+|    time_elapsed         | 748         |
+|    total_timesteps      | 6656        |
+| train/                  |             |
+|    approx_kl            | 0.030208483 |
+|    clip_fraction        | 0.202       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.85       |
+|    explained_variance   | 0.428       |
+|    learning_rate        | 0.0001      |
+|    loss                 | 19.8        |
+|    n_updates            | 120         |
+|    policy_gradient_loss | 0.0175      |
+|    std                  | 1           |
+|    value_loss           | 95.5        |
+-----------------------------------------
+----------------------------------------
+| rollout/                |            |
+|    ep_len_mean          | 85.1       |
+|    ep_rew_mean          | -85.2      |
+| time/                   |            |
+|    fps                  | 8          |
+|    iterations           | 14         |
+|    time_elapsed         | 814        |
+|    total_timesteps      | 7168       |
+| train/                  |            |
+|    approx_kl            | 0.10299474 |
+|    clip_fraction        | 0.311      |
+|    clip_range           | 0.2        |
+|    entropy_loss         | -2.85      |
+|    explained_variance   | 0.655      |
+|    learning_rate        | 0.0001     |
+|    loss                 | 11.4       |
+|    n_updates            | 130        |
+|    policy_gradient_loss | 0.0244     |
+|    std                  | 1.01       |
+|    value_loss           | 57.6       |
+----------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 80          |
+|    ep_rew_mean          | -85.6       |
+| time/                   |             |
+|    fps                  | 8           |
+|    iterations           | 15          |
+|    time_elapsed         | 881         |
+|    total_timesteps      | 7680        |
+| train/                  |             |
+|    approx_kl            | 0.011353668 |
+|    clip_fraction        | 0.123       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.85       |
+|    explained_variance   | 0.437       |
+|    learning_rate        | 0.0001      |
+|    loss                 | 63          |
+|    n_updates            | 140         |
+|    policy_gradient_loss | 0.0076      |
+|    std                  | 1.01        |
+|    value_loss           | 134         |
+-----------------------------------------
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 3.31 seconds
+----------------------------------------
+| rollout/                |            |
+|    ep_len_mean          | 77.6       |
+|    ep_rew_mean          | -85.8      |
+| time/                   |            |
+|    fps                  | 8          |
+|    iterations           | 16         |
+|    time_elapsed         | 939        |
+|    total_timesteps      | 8192       |
+| train/                  |            |
+|    approx_kl            | 0.00750959 |
+|    clip_fraction        | 0.167      |
+|    clip_range           | 0.2        |
+|    entropy_loss         | -2.85      |
+|    explained_variance   | 0.692      |
+|    learning_rate        | 0.0001     |
+|    loss                 | 31.2       |
+|    n_updates            | 150        |
+|    policy_gradient_loss | 0.00597    |
+|    std                  | 1.01       |
+|    value_loss           | 79.5       |
+----------------------------------------
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 75.9        |
+|    ep_rew_mean          | -87.1       |
+| time/                   |             |
+|    fps                  | 8           |
+|    iterations           | 17          |
+|    time_elapsed         | 1006        |
+|    total_timesteps      | 8704        |
+| train/                  |             |
+|    approx_kl            | 0.035859942 |
+|    clip_fraction        | 0.123       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.85       |
+|    explained_variance   | -0.159      |
+|    learning_rate        | 0.0001      |
+|    loss                 | 11.9        |
+|    n_updates            | 160         |
+|    policy_gradient_loss | 0.00838     |
+|    std                  | 1.01        |
+|    value_loss           | 46.4        |
+-----------------------------------------
+------------------------------------------
+| rollout/                |              |
+|    ep_len_mean          | 66.7         |
+|    ep_rew_mean          | -87          |
+| time/                   |              |
+|    fps                  | 8            |
+|    iterations           | 18           |
+|    time_elapsed         | 1077         |
+|    total_timesteps      | 9216         |
+| train/                  |              |
+|    approx_kl            | 0.0078028897 |
+|    clip_fraction        | 0.338        |
+|    clip_range           | 0.2          |
+|    entropy_loss         | -2.85        |
+|    explained_variance   | 0.449        |
+|    learning_rate        | 0.0001       |
+|    loss                 | 18.5         |
+|    n_updates            | 170          |
+|    policy_gradient_loss | 0.0185       |
+|    std                  | 1.01         |
+|    value_loss           | 48.9         |
+------------------------------------------
+INFO:gym_donkeycar.envs.donkey_sim:New lap time: 1.95 seconds
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 66.2        |
+|    ep_rew_mean          | -86.3       |
+| time/                   |             |
+|    fps                  | 8           |
+|    iterations           | 19          |
+|    time_elapsed         | 1135        |
+|    total_timesteps      | 9728        |
+| train/                  |             |
+|    approx_kl            | 0.009105249 |
+|    clip_fraction        | 0.107       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.86       |
+|    explained_variance   | 0.673       |
+|    learning_rate        | 0.0001      |
+|    loss                 | 29          |
+|    n_updates            | 180         |
+|    policy_gradient_loss | -0.00461    |
+|    std                  | 1.01        |
+|    value_loss           | 58          |
+-----------------------------------------
+[rl_train] 异常 BrokenPipeError(32, 'Broken pipe'):已保存保命存档 outputs/rl_visionhr_canary.zip.crash
+Traceback (most recent call last):
+  File "/Users/hwp/Dev/DKC/sdsandbox/src/rl_train.py", line 397, in <module>
+    main()
+  File "/Users/hwp/Dev/DKC/sdsandbox/src/rl_train.py", line 376, in main
+    model.learn(args.steps, callback=CallbackList(callbacks), reset_num_timesteps=not bool(args.resume),
+  File "/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/ppo/ppo.py", line 311, in learn
+    return super().learn(
+  File "/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 324, in learn
+    continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer, n_rollout_steps=self.n_steps)
+  File "/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 218, in collect_rollouts
+    new_obs, rewards, dones, infos = env.step(clipped_actions)
+  File "/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/vec_env/base_vec_env.py", line 221, in step
+    self.step_async(actions)
+  File "/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/vec_env/base_vec_env.py", line 385, in step_async
+    self.venv.step_async(actions)
+  File "/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/vec_env/base_vec_env.py", line 385, in step_async
+    self.venv.step_async(actions)
+  File "/Users/hwp/Library/Python/3.9/lib/python/site-packages/stable_baselines3/common/vec_env/subproc_vec_env.py", line 133, in step_async
+    remote.send(("step", action))
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/connection.py", line 211, in send
+    self._send_bytes(_ForkingPickler.dumps(obj))
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/connection.py", line 416, in _send_bytes
+    self._send(header + buf)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/connection.py", line 373, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
