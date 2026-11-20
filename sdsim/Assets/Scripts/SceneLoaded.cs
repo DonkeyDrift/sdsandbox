@@ -9,9 +9,14 @@ public class SceneLoaded : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        SandboxServer server = GameObject.FindObjectOfType<SandboxServer>();
+        // The scene may hold several SandboxServers (public + private API).
+        // FindObjectOfType order is unspecified and changed across Unity
+        // versions, so configure every server instead of an arbitrary one.
+        SandboxServer[] servers = FindObjectsByType<SandboxServer>(FindObjectsSortMode.None);
 
-        if (server)
+        foreach (SandboxServer server in servers)
+        {
             server.OnSceneLoaded(inFrontEnd);
-    }    
+        }
+    }
 }
