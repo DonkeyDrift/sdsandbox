@@ -71,10 +71,16 @@ while head < queue.count {
 }
 
 // ---- 2) 圆角遮罩 + 输出两版 ----
+// Dock 实测（2026-11-20）：满幅 .icon 图稿在 Dock 里比标准图标大一圈
+//（本机量得 132px vs ZCode 105px）——可见图标须按 Apple 标准安全区
+// 占画布 ~80.5%（824/1024）。圆角半径同比例缩放。
+let artworkScale: CGFloat = 824.0 / 1024.0
+
 func roundedImage(_ ctx: CGContext) -> CGImage {
     let masked = makeContext()
-    let radius = CGFloat(W) * 0.2237
-    let rect = CGRect(x: 0, y: 0, width: W, height: H)
+    let inset = CGFloat(W) * (1.0 - artworkScale) / 2.0
+    let radius = CGFloat(W) * 0.2237 * artworkScale
+    let rect = CGRect(x: inset, y: inset, width: CGFloat(W) - inset * 2, height: CGFloat(H) - inset * 2)
     let path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
     masked.addPath(path)
     masked.clip()
