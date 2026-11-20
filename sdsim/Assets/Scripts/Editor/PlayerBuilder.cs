@@ -40,7 +40,7 @@ public class PlayerBuilder : Editor
     {
         EditorBuildSettingsScene[] scenes = EditorBuildSettings.scenes;
 
-        BuildReport report = BuildPipeline.BuildPlayer(scenes, "Builds/DonkeySimWin/donkey_sim.exe", BuildTarget.StandaloneWindows64, BuildOptions.None);
+        BuildReport report = BuildPipeline.BuildPlayer(scenes, "Builds/DonkeySimWin/Donkey Sim.exe", BuildTarget.StandaloneWindows64, BuildOptions.None);
         BuildSummary summary = report.summary;
 
 
@@ -49,7 +49,7 @@ public class PlayerBuilder : Editor
             Debug.Log("Build succeeded: " + summary.totalSize + " bytes");
 
             string assetBundlePath = "Assets/AssetBundles/" + BuildTarget.StandaloneWindows64.ToString();
-            string destPath = "Builds/DonkeySimWin/donkey_sim_Data/StreamingAssets/";
+            string destPath = "Builds/DonkeySimWin/Donkey Sim_Data/StreamingAssets/";
             CopyDirectory(assetBundlePath, destPath);
         }
 
@@ -63,7 +63,7 @@ public class PlayerBuilder : Editor
     {
         EditorBuildSettingsScene[] scenes = EditorBuildSettings.scenes;
 
-        BuildReport report = BuildPipeline.BuildPlayer(scenes, "Builds/DonkeySimMac/donkey_sim.app", BuildTarget.StandaloneOSX, BuildOptions.None);
+        BuildReport report = BuildPipeline.BuildPlayer(scenes, "Builds/DonkeySimMac/Donkey Sim.app", BuildTarget.StandaloneOSX, BuildOptions.None);
         BuildSummary summary = report.summary;
 
         if (summary.result == BuildResult.Succeeded)
@@ -71,7 +71,7 @@ public class PlayerBuilder : Editor
             Debug.Log("Build succeeded: " + summary.totalSize + " bytes");
 
             string assetBundlePath = "Assets/AssetBundles/" + BuildTarget.StandaloneOSX.ToString();
-            string destPath = "Builds/DonkeySimMac/donkey_sim.app/Contents/Resources/Data/StreamingAssets";
+            string destPath = "Builds/DonkeySimMac/Donkey Sim.app/Contents/Resources/Data/StreamingAssets";
             CopyDirectory(assetBundlePath, destPath);
         }
 
@@ -85,7 +85,7 @@ public class PlayerBuilder : Editor
     {
         EditorBuildSettingsScene[] scenes = EditorBuildSettings.scenes;
 
-        BuildReport report = BuildPipeline.BuildPlayer(scenes, "Builds/DonkeySimLinux/donkey_sim.x86_64", BuildTarget.StandaloneLinux64, BuildOptions.None);
+        BuildReport report = BuildPipeline.BuildPlayer(scenes, "Builds/DonkeySimLinux/Donkey Sim.x86_64", BuildTarget.StandaloneLinux64, BuildOptions.None);
         BuildSummary summary = report.summary;
 
         if (summary.result == BuildResult.Succeeded)
@@ -93,7 +93,7 @@ public class PlayerBuilder : Editor
             Debug.Log("Build succeeded: " + summary.totalSize + " bytes");
 
             string assetBundlePath = "Assets/AssetBundles/" + BuildTarget.StandaloneLinux64.ToString();
-            string destPath = "Builds/DonkeySimLinux/donkey_sim_Data/StreamingAssets";
+            string destPath = "Builds/DonkeySimLinux/Donkey Sim_Data/StreamingAssets";
             CopyDirectory(assetBundlePath, destPath);
         }
 
