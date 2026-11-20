@@ -1,5 +1,8 @@
 using System;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Debug = UnityEngine.Debug;
@@ -8,9 +11,10 @@ namespace DonkeySimUpdate
 {
     public static class SimulatorUpdateButtonHook
     {
-        private const string LatestReleaseUrl = "https://github.com/tawnkramer/gym-donkeycar/releases/latest";
+        private const string LatestReleaseUrl = "https://github.com/DonkeyDrift/gym-donkeycar/releases/latest";
         private const string UpdaterModule = "gym_donkeycar.simulator_update";
         private const string ButtonLabel = "Update & Restart";
+        private const string ChannelPrefKey = "DonkeySimUpdateChannel";
         private static SimulatorUpdateButton button;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -31,10 +35,39 @@ namespace DonkeySimUpdate
             UnityEngine.Object.DontDestroyOnLoad(gameObject);
         }
 
+        public static bool IsPrereleaseChannel()
+        {
+            return PlayerPrefs.GetString(ChannelPrefKey, "stable") == "prerelease";
+        }
+
+        public static void DrawChannelToggle(Rect panelRect)
+        {
+            float x = panelRect.x * Screen.width;
+            float y = (panelRect.y + panelRect.height) * Screen.height + 8.0f;
+            float width = Mathf.Max(240.0f, panelRect.width * Screen.width);
+            string label = IsPrereleaseChannel()
+                ? "Update channel: Pre-release (click for Stable)"
+                : "Update channel: Stable (click for Pre-release)";
+            if (GUI.Button(new Rect(x, y, width, 26.0f), label))
+            {
+                PlayerPrefs.SetString(ChannelPrefKey, IsPrereleaseChannel() ? "stable" : "prerelease");
+                PlayerPrefs.Save();
+                if (button != null)
+                {
+                    button.ResetUpdateCheck();
+                }
+            }
+        }
+
+        private static string ChannelArgument()
+        {
+            return IsPrereleaseChannel() ? " --prerelease" : "";
+        }
+
         private static void UpdateAndRestart()
         {
             string pid = Process.GetCurrentProcess().Id.ToString();
-            string arguments = "update --apply-after-exit --pid " + pid + " --restart";
+            string arguments = "update --apply-after-exit --pid " + pid + " --restart" + ChannelArgument();
             if (StartUpdater(arguments))
             {
                 Application.Quit();
@@ -48,22 +81,43 @@ namespace DonkeySimUpdate
 
         private static bool StartUpdater(string arguments)
         {
+            string fileName;
+            string argumentPrefix;
+            if (!TryFindUpdater(out fileName, out argumentPrefix))
+            {
+                return false;
+            }
+
+            return ShellStart(fileName, argumentPrefix + arguments);
+        }
+
+        private static bool TryFindUpdater(out string fileName, out string argumentPrefix)
+        {
+            fileName = null;
+            argumentPrefix = "";
+
             string customUpdater = Environment.GetEnvironmentVariable("DONKEY_SIM_UPDATER");
             if (!string.IsNullOrEmpty(customUpdater) && System.IO.File.Exists(customUpdater))
             {
-                return ShellStart(customUpdater, arguments);
+                fileName = customUpdater;
+                argumentPrefix = "";
+                return true;
             }
 
             if (Application.platform == RuntimePlatform.WindowsPlayer)
             {
                 if (CommandExists("cmd", "/c where donkey-sim-update"))
                 {
-                    return ShellStart("cmd", "/c donkey-sim-update " + arguments);
+                    fileName = "cmd";
+                    argumentPrefix = "/c donkey-sim-update ";
+                    return true;
                 }
 
                 if (CommandExists("cmd", "/c where python"))
                 {
-                    return ShellStart("cmd", "/c python -m " + UpdaterModule + " " + arguments);
+                    fileName = "cmd";
+                    argumentPrefix = "/c python -m " + UpdaterModule + " ";
+                    return true;
                 }
 
                 return false;
@@ -82,13 +136,17 @@ namespace DonkeySimUpdate
             {
                 if (!string.IsNullOrEmpty(candidate) && System.IO.File.Exists(candidate))
                 {
-                    return ShellStart(candidate, arguments);
+                    fileName = candidate;
+                    argumentPrefix = "";
+                    return true;
                 }
             }
 
             if (CommandExists("donkey-sim-update", "--help"))
             {
-                return ShellStart("donkey-sim-update", arguments);
+                fileName = "donkey-sim-update";
+                argumentPrefix = "";
+                return true;
             }
 
             string[] pythonCandidates = { "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3", "python3" };
@@ -96,7 +154,9 @@ namespace DonkeySimUpdate
             {
                 if (CommandExists(python, "-m " + UpdaterModule + " --help"))
                 {
-                    return ShellStart(python, "-m " + UpdaterModule + " " + arguments);
+                    fileName = python;
+                    argumentPrefix = "-m " + UpdaterModule + " ";
+                    return true;
                 }
             }
 
@@ -159,11 +219,26 @@ namespace DonkeySimUpdate
 
         private sealed class SimulatorUpdateButton : MonoBehaviour
         {
+            private const int CheckTimeoutMilliseconds = 30000;
+
             private GUIStyle buttonStyle;
+            private bool updateCheckStarted;
+            private volatile bool updateAvailable;
             private bool testInvoked;
+
+            public void ResetUpdateCheck()
+            {
+                updateCheckStarted = false;
+                updateAvailable = false;
+            }
 
             private void Update()
             {
+                if (IsMenuScene(SceneManager.GetActiveScene()))
+                {
+                    StartUpdateCheck();
+                }
+
                 if (!testInvoked &&
                     Environment.GetEnvironmentVariable("DONKEY_SIM_UPDATE_TEST") == "1" &&
                     Time.frameCount >= 10)
@@ -173,10 +248,80 @@ namespace DonkeySimUpdate
                 }
             }
 
+            private static bool IsMenuScene(Scene scene)
+            {
+                return scene.buildIndex == 0 || scene.name == "menu";
+            }
+
+            private void StartUpdateCheck()
+            {
+                if (updateCheckStarted)
+                {
+                    return;
+                }
+
+                updateCheckStarted = true;
+                ThreadPool.QueueUserWorkItem(state => RunUpdateCheck());
+            }
+
+            private void RunUpdateCheck()
+            {
+                string fileName;
+                string argumentPrefix;
+                if (!TryFindUpdater(out fileName, out argumentPrefix))
+                {
+                    return;
+                }
+
+                try
+                {
+                    using (Process process = CreateUpdateCheckProcess(fileName, argumentPrefix))
+                    {
+                        process.Start();
+                        Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+                        if (!process.WaitForExit(CheckTimeoutMilliseconds))
+                        {
+                            process.Kill();
+                            return;
+                        }
+
+                        string output = outputTask.Result;
+                        if (process.ExitCode != 0)
+                        {
+                            return;
+                        }
+
+                        Match match = Regex.Match(
+                            output,
+                            "\"update_available\"\\s*:\\s*(true|false)");
+                        if (!match.Success)
+                        {
+                            return;
+                        }
+
+                        updateAvailable = match.Groups[1].Value == "true";
+                    }
+                }
+                catch (Exception)
+                {
+                    updateAvailable = false;
+                }
+            }
+
+            private static Process CreateUpdateCheckProcess(string fileName, string argumentPrefix)
+            {
+                ProcessStartInfo startInfo = new ProcessStartInfo();
+                startInfo.FileName = fileName;
+                startInfo.Arguments = argumentPrefix + "check --json" + ChannelArgument();
+                startInfo.UseShellExecute = false;
+                startInfo.CreateNoWindow = true;
+                startInfo.RedirectStandardOutput = true;
+                return new Process { StartInfo = startInfo };
+            }
+
             private void OnGUI()
             {
-                Scene scene = SceneManager.GetActiveScene();
-                if (scene.buildIndex != 0 && scene.name != "menu")
+                if (!updateAvailable || !IsMenuScene(SceneManager.GetActiveScene()))
                 {
                     return;
                 }
