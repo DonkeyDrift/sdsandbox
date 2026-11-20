@@ -14,6 +14,9 @@ carrying, on top of everything already inside:
   - Contents/Resources/Data/Managed/SimulatorAppIconHook.dll — the runtime
     Dock-tile switcher + in-menu Auto/Light/Dark setting (compiled here with
     the Unity editor's mcs against the package's own UnityEngine modules).
+  - Contents/Resources/Data/Managed/MacTitleBarHider.dll — hides the window
+    title bar while keeping the native traffic lights (same CarRecovery.Update
+    anchor; macOS-only and inert elsewhere, Win/Linux packages never carry it).
   - Contents/Resources/Data/ScriptingAssemblies.json — the hook DLL
     registered (names + types:16), mirroring the button hook entry.
   - Contents/Resources/icon-day.png / icon-night.png — the light artwork
@@ -40,10 +43,12 @@ import zipfile
 from pathlib import Path
 
 HOOK_DLL_NAME = "SimulatorAppIconHook.dll"
+HIDER_DLL_NAME = "MacTitleBarHider.dll"
 TOOL_DIR = Path(__file__).resolve().parent
 UPDATE_BUTTON_DIR = TOOL_DIR.parent / "simulator-update-button"
 ICON_HOOK_SOURCE = UPDATE_BUTTON_DIR / "SimulatorAppIconHook.cs"
 BUTTON_HOOK_SOURCE = UPDATE_BUTTON_DIR / "SimulatorUpdateButtonHook.cs"
+HIDER_SOURCE = UPDATE_BUTTON_DIR / "MacTitleBarHider.cs"
 PATCHER_SOURCE = UPDATE_BUTTON_DIR / "PatchAssembly.cs"
 APPLY_ICON_SCRIPT = TOOL_DIR / "apply-dark-icon.sh"
 DEFAULT_MONO_ROOT = Path(
@@ -144,16 +149,25 @@ def patch_app_directory(app, work, mono_root):
     manifest = json.loads(manifest_path.read_text())
     if HOOK_DLL_NAME in manifest["names"]:
         raise RuntimeError("source zip already carries the app icon hook")
+    if HIDER_DLL_NAME in manifest["names"]:
+        raise RuntimeError("source zip already carries the mac title bar hider")
     if len(manifest["names"]) != len(manifest["types"]):
         raise RuntimeError("unexpected ScriptingAssemblies.json shape")
 
     icon_hook_dll = work / HOOK_DLL_NAME
     button_hook_dll = work / "SimulatorUpdateButtonHook.dll"
+    hider_dll = work / HIDER_DLL_NAME
     compile_hook_dll(mono_root, managed, ICON_HOOK_SOURCE, icon_hook_dll)
-    if "SimulatorUpdateButtonHook.dll" in manifest["names"]:
-        # The published button DLL is already inside; recompile a copy purely
-        # so the patcher can resolve the (already-injected) button Install.
-        compile_hook_dll(mono_root, managed, BUTTON_HOOK_SOURCE, button_hook_dll)
+    compile_hook_dll(mono_root, managed, HIDER_SOURCE, hider_dll)
+    # Always build the button hook from the repo's canonical source and ship
+    # it: published packages may carry an old variant without the availability
+    # check / channel toggle / test trigger, and the injected Install resolves
+    # against whatever dll is in Managed at runtime.
+    compile_hook_dll(mono_root, managed, BUTTON_HOOK_SOURCE, button_hook_dll)
+    if "SimulatorUpdateButtonHook.dll" not in manifest["names"]:
+        manifest["names"].append("SimulatorUpdateButtonHook.dll")
+        manifest["types"].append(16)
+    shutil.copyfile(button_hook_dll, managed / "SimulatorUpdateButtonHook.dll")
     mono, patcher_exe = compile_patcher(mono_root, work)
 
     patched_assembly = work / "Assembly-CSharp.patched.dll"
@@ -165,15 +179,21 @@ def patch_app_directory(app, work, mono_root):
             patched_assembly,
             f"{icon_hook_dll}=DonkeySimUpdate.SimulatorAppIconHook::CarRecovery.Update",
             f"{button_hook_dll}=DonkeySimUpdate.SimulatorUpdateButtonHook::CarRecovery.Update",
+            f"{hider_dll}=DonkeySimUpdate.MacTitleBarHider::CarRecovery.Update",
         ]
     )
     patched_bytes = patched_assembly.read_bytes()
     if b"SimulatorAppIconHook" not in patched_bytes:
         raise RuntimeError("patched Assembly-CSharp.dll does not reference the icon hook")
+    if b"MacTitleBarHider" not in patched_bytes:
+        raise RuntimeError("patched Assembly-CSharp.dll does not reference the title bar hider")
     (managed / "Assembly-CSharp.dll").write_bytes(patched_bytes)
 
     shutil.copyfile(icon_hook_dll, managed / HOOK_DLL_NAME)
     manifest["names"].append(HOOK_DLL_NAME)
+    manifest["types"].append(16)
+    shutil.copyfile(hider_dll, managed / HIDER_DLL_NAME)
+    manifest["names"].append(HIDER_DLL_NAME)
     manifest["types"].append(16)
     manifest_path.write_text(json.dumps(manifest, separators=(",", ":")))
 
@@ -200,7 +220,7 @@ def main():
     output = args.output.absolute()
     if not source.is_file():
         raise RuntimeError(f"source zip not found: {source}")
-    for required in (ICON_HOOK_SOURCE, BUTTON_HOOK_SOURCE, PATCHER_SOURCE):
+    for required in (ICON_HOOK_SOURCE, BUTTON_HOOK_SOURCE, HIDER_SOURCE, PATCHER_SOURCE):
         if not required.is_file():
             raise RuntimeError(f"source not found: {required}")
 
@@ -222,6 +242,7 @@ def main():
         names = set(verify.namelist())
     for expected in (
         "donkey_sim.app/Contents/Resources/Data/Managed/SimulatorAppIconHook.dll",
+        "donkey_sim.app/Contents/Resources/Data/Managed/MacTitleBarHider.dll",
         "donkey_sim.app/Contents/Resources/icon-day.png",
         "donkey_sim.app/Contents/Resources/icon-night.png",
         "donkey_sim.app/Contents/Resources/Assets.car",
