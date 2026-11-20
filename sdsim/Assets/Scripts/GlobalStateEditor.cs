@@ -154,7 +154,6 @@ public class GlobalStateEditor : MonoBehaviour
         }
         if (useSeed) totalRows += 1;
         if (showPrivateKey) totalRows += 2;
-        if (versionCheck != null && versionCheck.latest != GlobalState.version) totalRows += 3;
 
         // keep every size relative to the panel so the text scales with the
         // window the same way on 1x and 2x displays
